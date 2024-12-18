@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Magic Wand Tool with Brightness Adjustment</title>
+
+    <style>
+        #imageCanvas { border: 1px solid black; }
+        #generatedImages img { max-width: 1000px; margin: 5px; }
+        #generatedImages {
+            display: grid;
+            gap: 20px;
+        }
+
+        .effect-container {
+            text-align: center;
+        }
+
+        .effect-container canvas {
+            max-width: 100%;
+            height: auto;
+        }
+        
+        .gif-container {
+            margin-bottom: 20px;
+        }
+        
+        .segmented-images {
+            display: flex;
+            flex-wrap: nowrap;
+            overflow-x: auto;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .segment-wrapper {
+            flex: 0 0 auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .segment-wrapper p {
+            margin: 5px 0;
+            font-size: 14px;
+        }
+
+        .segment-wrapper canvas {
+            border: 1px solid #ddd;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <input type="file" id="imageUpload" accept="image/*">
+        <button id="addMagicWand">Add</button>
+        <button id="subtractMagicWand">Subtract</button>
+        <button id="invertMagicWand">Invert</button>
+        <label for="tolerance">Tolerance:</label>
+        <input type="range" id="tolerance" min="0" max="255" value="32">
+        <label for="imageCount">Image Count:</label>
+        <input type="number" id="imageCount" min="1" value="5">
+        <label for="brightness">Max Brightness Change:</label>
+        <input type="range" id="brightness" min="0" max="255" value="100">
+        <button id="generateImages">Generate Images</button>
+        <button id="generateGIF">Generate GIF</button>
+        <input type="number" id="value1" value="0">
+        <input type="number" id="value2" value="0">
+        <input type="number" id="value3" value="0">
+        <input type="number" id="value4" value="0">
+        <input type="number" id="value5" value="0">
+        <select id="effectSelect">
+            <option value="brightness2">Brightness</option>
+            <option value="hue1">Hue1</option>
+            <option value="saturation">Saturation</option>
+        </select>
+        <button id="lassoTool">Lasso Tool</button>
+    </div>
+    <canvas id="imageCanvas"></canvas>
+    <div id="generatedImages"></div>
+    <div id="segmentsContainer"></div>
+    <script>
+        let imageCanvas, ctx, originalImage;
+        let selectedRegions = [];
+        let tolerance = 32;
+        let magicWandMode = 'add';
+        let clickedPoints = [];
+        let lines = [];
+        
+        document.getElementById('imageUpload').addEventListener('change', loadImage);
+        document.getElementById('addMagicWand').addEventListener('click', () => magicWandMode = 'add');
+        document.getElementById('subtractMagicWand').addEventListener('click', () => magicWandMode = 'subtract');
+        document.getElementById('invertMagicWand').addEventListener('click', () => magicWandMode = 'invert');
+        document.getElementById('tolerance').addEventListener('input', (e) => tolerance = parseInt(e.target.value));
+        document.getElementById('lassoTool').addEventListener('click', () => setTool('lasso'));
+        let currentTool = 'magicWand'; // Default tool
+
+        document.getElementById('imageUpload').addEventListener('change', loadImage);
+
+        document.getElementById('addMagicWand').addEventListener('click', () => setTool('magicWand', 'add'));
+        document.getElementById('subtractMagicWand').addEventListener('click', () => setTool('magicWand', 'subtract'));
+        document.getElementById('invertMagicWand').addEventListener('click', () => setTool('magicWand', 'invert'));
+        document.getElementById('tolerance').addEventListener('input', (e) => tolerance = parseInt(e.target.value));
+        document.getElementById('lassoTool').addEventListener('click', () => setTool('lasso'));
+
+        function startDrawing(event) {
+            if (currentTool === 'lasso') {
+                isDrawingLasso = true;
+                const point = getCanvasPoint(event);
+                lassoPoints = [point];
+            }
+            redrawCanvas();
+        }
+
+        function draw(event) {
+            if (currentTool === 'lasso' && isDrawingLasso) {
+                const point = getCanvasPoint(event);
+                lassoPoints.push(point);
+                redrawCanvas();
+            }
+        }
+
+        function stopDrawing(event) {
+            if (currentTool === 'lasso' && isDrawingLasso) {
+                isDrawingLasso = false;
+                if (lassoPoints.length > 2) {
+                    finishSelection();
+                } else {
+                    lassoPoints = [];
+                }
+            } else if (currentTool === 'magicWand') {
+                const point = getCanvasPoint(event);
+                performMagicWandSelection(point.x, point.y);
+            }
+            redrawCanvas();
+        }
+
+        function finishSelection() {
+            let selectedRegion;
+            if (currentTool === 'lasso') {
+                const imageData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height);
+                selectedRegion = processLassoSelection(imageData, lassoPoints);
+                lassoPoints = [];
+            } else if (currentTool === 'magicWand') {
+                return;
+            }
+            updateSelectedRegions(selectedRegion);
+        }
+
+        function getCanvasPoint(event) {
+            const rect = imageCanvas.getBoundingClientRect();
+            return {
+                x: Math.floor((event.clientX - rect.left) / (rect.width / imageCanvas.width)),
+                y: Math.floor((event.clientY - rect.top) / (rect.height / imageCanvas.height))
+            };
+        }
+
+        function redrawCanvas() {
+            ctx.clearRect(0, 0, imageCanvas.width, imageCanvas.height);
+            ctx.drawImage(originalImage, 0, 0);
+            displaySelectedRegionsBorders();
+            
+            if (currentTool === 'lasso' && lassoPoints.length > 0) {
+                ctx.beginPath();
+                ctx.moveTo(lassoPoints[0].x, lassoPoints[0].y);
+                for (let i = 1; i < lassoPoints.length; i++) {
+                    ctx.lineTo(lassoPoints[i].x, lassoPoints[i].y);
+                }
+                if (!isDrawingLasso) {
+                    ctx.closePath();
+                }
+                ctx.strokeStyle = 'yellow';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                if (!isDrawingLasso) {
+                    ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+                    ctx.fill();
+                }
+            }
+        }
+
+        function finishLasso() {
+            lassoPoints.push(lassoPoints[0]);
+
+            const imageData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height);
+            const selectedRegion = processLassoSelection(imageData, lassoPoints);
+
+            updateSelectedRegions(selectedRegion);
+            lassoPoints = [];
+            isLassoActive = false;
+            document.getElementById('lassoTool').textContent = 'Lasso Tool';
+            redrawCanvas();
+        }
+
+        function loadImage() {
+            originalImage = new Image();
+            originalImage.onload = function() {
+                imageCanvas.width = originalImage.width;
+                imageCanvas.height = originalImage.height;
+                ctx.drawImage(originalImage, 0, 0);
+                originalImageData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height);
+                redrawCanvas();
+            }
+            originalImage.src = 'face1.jpg';
+        }
+
+        function performMagicWandSelection(startX, startY) {
+            const imageData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height);
+            const worker = new Worker('js/magicWand1Worker.js');
+            worker.postMessage({
+                imageData: imageData,
+                startX: startX,
+                startY: startY,
+                tolerance: tolerance,
+                mode: 'add'
+            });
+            worker.onmessage = function(e) {
+                let newRegion = e.data.selectedRegion;
+                updateSelectedRegions(newRegion);
+                redrawCanvas();
+            };
+        }
+
+        function updateSelectedRegions(newRegion) {
+            selectedRegions.push(newRegion);
+        }
+
+        function displaySelectedRegionsBorders() {
+            ctx.strokeStyle = 'red';
+            ctx.lineWidth = 1;
+            selectedRegions.forEach(region => {
+                ctx.beginPath();
+                region.forEach(pixelIndex => {
+                    const x = pixelIndex % imageCanvas.width;
+                    const y = Math.floor(pixelIndex / imageCanvas.width);
+                    ctx.rect(x, y, 1, 1);
+                });
+                ctx.stroke();
+            });
+        }
+
+        function processLassoSelection(imageData, lassoPoints) {
+            const width = imageData.width;
+            const height = imageData.height;
+            const selectedRegion = [];
+
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = width;
+            tempCanvas.height = height;
+            const tempCtx = tempCanvas.getContext('2d');
+
+            tempCtx.beginPath();
+            tempCtx.moveTo(lassoPoints[0].x, lassoPoints[0].y);
+            for (let i = 1; i < lassoPoints.length; i++) {
+                tempCtx.lineTo(lassoPoints[i].x, lassoPoints[i].y);
+            }
+            tempCtx.closePath();
+            tempCtx.fill();
+
+            const tempImageData = tempCtx.getImageData(0, 0, width, height);
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    const index = (y * width + x) * 4;
+                    if (tempImageData.data[index + 3] > 0) {
+                        selectedRegion.push(y * width + x);
+                    }
+                }
+            }
+
+            return selectedRegion;
+        }
+
+        const button = document.getElementById('generateImages');
+        
+        setTimeout(function() {
+            button.click();
+        }, 1000);
+
+        document.getElementById('generateImages').addEventListener('click', function() {
+            combineBackgroundAndNonSelected();
+        });
+        
+        window.onload = loadImage;
+        imageCanvas = document.getElementById('imageCanvas');
+        ctx = imageCanvas.getContext('2d');
+        imageCanvas.addEventListener('mousedown', startDrawing);
+        imageCanvas.addEventListener('mousemove', draw);
+        imageCanvas.addEventListener('mouseup', stopDrawing);
+        imageCanvas.addEventListener('mouseout', stopDrawing);
+
+        function setTool(tool) {
+            currentTool = tool;
+            if (tool === 'lasso') {
+                isLassoActive = true;
+                document.getElementById('lassoTool').textContent = 'Cancel Lasso';
+            } else {
+                isLassoActive = false;
+                document.getElementById('lassoTool').textContent = 'Lasso Tool';
+            }
+            redrawCanvas();
+        }
+
+        function combineBackgroundAndNonSelected() {
+            const nonSelectedWorker = new Worker('js/nonselectedWorker.js');
+            nonSelectedWorker.postMessage({
+                imageData: originalImageData,
+                selectedRegions: selectedRegions
+            });
+            nonSelectedWorker.onmessage = (e) => {
+                const nonSelectedResult = e.data;
+                displaySeparateResults([], nonSelectedResult.segmentedImages);
+            };
+        }
+
+        function displaySeparateResults(backgroundImages, nonSelectedImages) {
+            const container = document.getElementById('generatedImages');
+            container.innerHTML = '';
+
+            const wrapper = document.createElement('div');
+            wrapper.style.display = 'flex';
+            wrapper.style.justifyContent = 'space-around';
+
+            const nonSelectedGif = createGifContainer('Non-Selected Regions', nonSelectedImages);
+            wrapper.appendChild(nonSelectedGif);
+
+            container.appendChild(wrapper);
+        }
+
+        function createGifContainer(title, images) {
+            const gifContainer = document.createElement('div');
+            gifContainer.className = 'gif-container1';
+
+            const titleElement = document.createElement('h4');
+            titleElement.textContent = title;
+            gifContainer.appendChild(titleElement);
+
+            const canvas = document.createElement('canvas');
+            canvas.width = images[0].width;
+            canvas.height = images[0].height;
+            gifContainer.appendChild(canvas);
+
+            const ctx = canvas.getContext('2d');
+            let currentFrame = 0;
+
+            function animate() {
+                ctx.putImageData(images[currentFrame], 0, 0);
+                currentFrame = (currentFrame + 1) % images.length;
+                setTimeout(() => animate(), 200);
+            }
+
+            animate();
+
+            return gifContainer;
+        }
+    </script>
+</body>
+</html>

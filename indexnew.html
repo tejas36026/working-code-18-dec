@@ -1,0 +1,1044 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Optimized Image Processing</title>
+    <style>
+        body {display: flex; margin: 0; padding: 0; height: 100vh; font-family: Arial, sans-serif;}
+        #sidebar {width: 300px; background-color: #f0f0f0; padding: 20px; overflow-y: auto; height: 100vh; box-sizing: border-box; box-shadow: 2px 0 5px rgba(0,0,0,0.1); min-width: 200px; max-width: 50%;}
+        #mainContent {flex-grow: 1; padding: 20px; overflow-y: auto;}
+        .controls {display: flex; flex-direction: column; gap: 1px; margin-bottom: 20px;}
+        .controls input, .controls button, .effect-button {width: 100%; padding: 10px; margin-bottom: 10px; border: none; border-radius: 5px; background-color: #ffffff; transition: all 0.3s ease;}
+        .controls button, .effect-button {cursor: pointer; text-align: center; font-weight: bold; color: #333;}
+        .controls button:hover, .effect-button:hover {background-color: #f5f5f5; box-shadow: 0 4px 8px rgba(0,0,0,0.15);}
+        #effectControls {display: flex; flex-direction: column; gap: 1px;}
+        .effect-button {opacity: 0.8;}
+        .effect-button.processed {opacity: 1; background-color: #e6f3ff;}
+        .effect-button.inactive {opacity: 0.5; background-color: #f0f0f0;}
+        #resultsContainer {display: flex; flex-wrap: wrap;}
+        .canvas-wrapper {display: inline-block; 
+            width: 100px;
+            height: 100px;
+            margin: 5px; 
+            text-align: center;}
+        #masterCheckboxControl {margin-bottom: 15px;}
+        .canvas-wrapper img{
+    
+            width: 100px;
+            height: 100px;
+        
+        }
+        input[type="file"], input[type="number"] {background-color: #ffffff; border: 1px solid #ddd;}
+        label {margin-bottom: 5px; font-weight: bold; color: #555;}
+        #imageCanvas { border: 1px solid black; }
+        #generatedImages img { max-width: 1000px; margin: 5px; }
+        #generatedImages {
+            display: grid;
+            gap: 20px;
+        }
+        .effect-container {
+            text-align: center;
+        }
+        .effect-container canvas {
+            max-width: 100%;
+            height: auto;
+        }
+        .gif-container {
+            margin-bottom: 20px;
+        }
+        .segmented-images {
+            display: flex;
+            flex-wrap: nowrap;
+            overflow-x: auto;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .segment-wrapper {
+            flex: 0 0 auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .segment-wrapper p {
+            margin: 5px 0;
+            font-size: 14px;
+        }
+        .segment-wrapper canvas {
+            border: 1px solid #ddd;
+        }
+    </style>
+</head>
+<body>
+    <div id="sidebar">
+        <div class="controls">
+            <input type="file" id="imageUpload" accept="image/*">
+            <label for="imageCount">Number of images per effect:</label>
+            <input type="number" id="imageCount" min="1" max="100" value="10">
+            <button id="processButton">Process Image</button>
+            <button id="fastProcessButton">Fast Process</button>
+            <div>
+                <label for="widthInput">Target Width:</label>
+                <input type="number" id="widthInput" min="1" step="1">
+            </div>
+            <div>
+                <label for="heightInput">Target Height:</label>
+                <input type="number" id="heightInput" min="1" step="1">
+            </div>
+            <button id="resizeButton">Resize Image</button>
+            <button id="toggleDraw">Toggle Draw Mode</button>
+            <button id="removeObject">Remove Object</button>
+        </div>
+        <div id="masterCheckboxControl">
+            <input type="checkbox" id="masterCheckbox" checked>
+            <label for="masterCheckbox">Select/Unselect All</label>
+        </div>
+        <div id="effectControls"></div>
+    </div>
+    <div id="mainContent">
+        <div id="resultsContainer"></div>
+        <canvas id="imageCanvas"></canvas>
+        <div id="generatedImages"></div>
+        <div id="segmentsContainer"></div>
+        <div id="progress"></div> <!-- Added progress div -->
+    </div>
+
+    <script>
+        let originalImageData;
+let maskData; // Initialize maskData globally
+let size; // Initialize size globally
+let objectMask; // Initialize objectMask globally
+
+const imageUpload = document.getElementById('imageUpload');
+const resultsContainer = document.getElementById('resultsContainer');
+const effectControls = document.getElementById('effectControls');
+const imageCountInput = document.getElementById('imageCount');
+const processButton = document.getElementById('processButton');
+const masterCheckbox = document.getElementById('masterCheckbox');
+const fastProcessButton = document.getElementById('fastProcessButton');
+const resizeButton = document.getElementById('resizeButton');
+const toggleDrawButton = document.getElementById('toggleDraw');
+const removeObjectButton = document.getElementById('removeObject');
+const widthInput = document.getElementById('widthInput');
+const heightInput = document.getElementById('heightInput');
+const imageCanvas = document.getElementById('imageCanvas');
+const ctx = imageCanvas.getContext('2d');
+const progressDiv = document.getElementById('progress'); // Initialize progressDiv
+
+const effects = [
+    'droste',
+    'running1',
+    'running2',
+    'running3',
+    'running4',
+    'running5',
+    'running6',
+    'running7',
+    'running8',
+    'running9',
+    'running10',
+    'running11',
+    'running12',
+    'running13',
+    'running14',
+    'running15',
+    'running16',
+    'running17',
+    'running18',
+    'running19',
+    'running20',
+    'running21',
+    'running22',
+    'running23',
+    'running24',
+    'running25',
+    'running26',
+    'running27',
+    'running28',
+    'running29',
+    'running30',
+    'running31',
+    'running32',
+    'running33',
+    'running34',
+    'running35',
+    'running36',
+    'running37',
+];
+
+const animationEffects = [
+    'perspectiveTilt', 'perspectiveSqueeze', 'perspectiveCurve', 'perspectiveTwist',
+    'perspectiveFisheye', 'perspective', 'perspectiveRotate', 'perspectiveSkew',
+    'perspectiveWarp', 'perspectiveZoom', 'perspectiveTunnel', 'perspectiveSphere',
+    'perspectiveCylinder', 'perspectiveRipple', 'perspectiveVortex', 'perspectiveFold',
+    'perspectivePixelate', 'perspectiveEmboss', 'perspectiveMosaic',
+    'perspectiveOilPainting', 'perspectivePosterize'
+];
+
+const workers = {};
+effects.forEach(effect => { workers[effect] = new Worker(`js/${effect}Worker.js`); });
+
+let processedImages = {};
+let originalImage;
+let selectedRegions = [];
+let tolerance = 32;
+let magicWandMode = 'add';
+let clickedPoints = [];
+let drawMode = false;
+let isDrawing = false;
+let worker = null;
+
+processButton.addEventListener('click', () => processImageWithMethod(processImage));
+fastProcessButton.addEventListener('click', () => processImageWithMethod(fastProcessImage));
+masterCheckbox.addEventListener('change', toggleAllEffects);
+resizeButton.addEventListener('click', startResizing);
+toggleDrawButton.addEventListener('click', toggleDrawMode);
+removeObjectButton.addEventListener('click', performObjectRemoval);
+imageCanvas.addEventListener('click', handleCanvasClick);
+imageCanvas.addEventListener('mousedown', startDrawing);
+imageCanvas.addEventListener('mousemove', draw);
+imageCanvas.addEventListener('mouseup', stopDrawing);
+
+const animationControlDiv = document.createElement('div');
+animationControlDiv.className = 'effect-control';
+const animationCheckbox = document.createElement('input');
+animationCheckbox.type = 'checkbox';
+animationCheckbox.id = 'animationCheckbox';
+animationCheckbox.addEventListener('change', toggleAnimationEffects);
+const animationLabel = document.createElement('label');
+animationLabel.htmlFor = 'animationCheckbox';
+animationLabel.textContent = 'Animation';
+animationControlDiv.appendChild(animationCheckbox);
+animationControlDiv.appendChild(animationLabel);
+effectControls.appendChild(animationControlDiv);
+effects.forEach(effect => {
+    const controlDiv = document.createElement('div');
+    controlDiv.className = 'effect-control';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.id = `${effect}Checkbox`;
+    checkbox.checked = true;
+    checkbox.addEventListener('change', updateMasterCheckbox);
+    const label = document.createElement('label');
+    label.htmlFor = `${effect}Checkbox`;
+    label.textContent = effect;
+    controlDiv.appendChild(checkbox);
+    controlDiv.appendChild(label);
+    effectControls.appendChild(controlDiv);
+});
+
+function toggleAnimationEffects() {
+    const isChecked = document.getElementById('animationCheckbox').checked;
+    animationEffects.forEach(effect => {
+        const checkbox = document.getElementById(effect + 'Checkbox');
+        if (checkbox) {
+            checkbox.checked = isChecked;
+        }
+    });
+    updateMasterCheckbox();
+}
+
+function toggleAllEffects() {
+    const isChecked = masterCheckbox.checked;
+    effects.forEach(effect => {
+        if (!animationEffects.includes(effect)) {
+            document.getElementById(effect + 'Checkbox').checked = isChecked;
+        }
+    });
+}
+
+function updateMasterCheckbox() {
+    const effectCheckboxes = effects.filter(effect => !animationEffects.includes(effect));
+    const allChecked = effectCheckboxes.every(effect => document.getElementById(effect + 'Checkbox').checked);
+    const anyChecked = effectCheckboxes.some(effect => document.getElementById(effect + 'Checkbox').checked);
+    masterCheckbox.checked = allChecked;
+    masterCheckbox.indeterminate = anyChecked && !allChecked;
+}
+
+function updateEffectDisplay(effect) {
+    const effectButton = document.querySelector(`.effect-button[data-effect="${effect}"]`);
+    if (effectButton) effectButton.classList.add('processed');
+}
+
+async function fastProcessImage(img) {
+    processedImages = {};
+    const imageCount = parseInt(imageCountInput.value);
+    displayEffectButtons();
+    const effectPromises = effects.filter(effect => document.getElementById(`${effect}Checkbox`).checked).map(async (effect) => {
+        processedImages[effect] = [];
+        for (let i = 0; i < imageCount; i++) {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            let value = getEffectValue(effect, i, imageCount);
+console.log(selectedRegion);
+console.log(selectedRegions);
+            console.log(value);
+            try {
+                const processedImageData = await applyEffect(effect, imageData, value);
+                ctx.putImageData(processedImageData, 0, 0);
+                processedImages[effect].push({ value: value, dataUrl: canvas.toDataURL() });
+                updateEffectDisplay(effect);
+            } catch (error) {
+                console.error(`Error processing effect ${effect} for image ${i+1}:`, error.message);
+            }
+        }
+    });
+    await Promise.all(effectPromises);
+    displayProcessedImages();
+}
+
+imageUpload.addEventListener('change', (event) => {
+    const file = event.target.files[0];
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            originalImage = new Image();
+            originalImage.onload = () => {
+                imageCanvas.width = originalImage.width;
+                imageCanvas.height = originalImage.height;
+                ctx.drawImage(originalImage, 0, 0);
+                originalImageData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height);
+                maskData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height); // Initialize maskData
+                size = { w: imageCanvas.width, h: imageCanvas.height }; // Initialize size
+                objectMask = matrix(imageCanvas.width, imageCanvas.height, false); // Initialize objectMask
+                console.log('Image loaded and originalImageData set.');
+            };
+            originalImage.onerror = (error) => {
+                console.error('Error loading image:', error);
+                alert('Failed to load the image. Please try again.');
+            };
+            originalImage.src = e.target.result; // Load the image into the canvas
+        };
+        reader.onerror = (error) => {
+            console.error('Error reading file:', error);
+            alert('Failed to read the file. Please try again.');
+        };
+        reader.readAsDataURL(file); // Read the file as a data URL
+    }
+});
+
+function processImageWithMethod(processingMethod) {
+    const file = imageUpload.files[0];
+    if (file) {
+        const objectUrl = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = function() {
+            URL.revokeObjectURL(objectUrl);
+            processingMethod(img);
+        }
+        img.src = objectUrl;
+    } else {
+        alert('Please select an image first.');
+    }
+}
+
+async function processImage(img) {
+    processedImages = {};
+    const imageCount = parseInt(imageCountInput.value);
+    displayEffectButtons();
+    for (const effect of effects.filter(effect => document.getElementById(`${effect}Checkbox`).checked)) {
+        processedImages[effect] = [];
+        for (let i = 0; i < imageCount; i++) {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            let value = getEffectValue(effect, i, imageCount);
+            try {
+                const processedImageData = await applyEffect(effect, imageData, value);
+                ctx.putImageData(processedImageData, 0, 0);
+                processedImages[effect].push({ value: value, dataUrl: canvas.toDataURL() });
+                updateEffectDisplay(effect);
+            } catch (error) {
+                console.error(`Error processing effect ${effect} for image ${i+1}:`, error);
+            }
+        }
+    }
+}
+
+function displayProcessedImages() {
+    resultsContainer.innerHTML = '';
+    for (const effect in processedImages) {
+        if (document.getElementById(`${effect}Checkbox`).checked) {
+            const images = processedImages[effect];
+            if (images && images.length > 0) {
+                const effectDiv = document.createElement('div');
+                effectDiv.className = 'effect-results';
+                const effectTitle = document.createElement('h3');
+                effectTitle.textContent = effect;
+                effectDiv.appendChild(effectTitle);
+                images.forEach((imgData) => {
+                    const wrapper = document.createElement('div');
+                    wrapper.className = 'canvas-wrapper';
+                    const img = new Image();
+                    img.src = imgData.dataUrl;
+                    wrapper.appendChild(img);
+                    effectDiv.appendChild(wrapper);
+                });
+                resultsContainer.appendChild(effectDiv);
+            }
+        }
+    }
+}
+
+function applyEffect(effect, imageData, value) {
+    return new Promise((resolve, reject) => {
+        if (!workers[effect]) {
+            reject(new Error(`Worker for effect ${effect} not found`));
+            return;
+        }
+        workers[effect].onmessage = function(e) {
+            if (e.data.error) {
+                reject(new Error(`Error in ${effect} worker: ${e.data.error}`));
+            } else {
+                resolve(e.data.imageData);
+            }
+        };
+        workers[effect].onerror = function(error) {
+            reject(new Error(`Error in ${effect} worker: ${error.message}`));
+        };
+        console.log(value);
+        workers[effect].postMessage({ imageData: imageData, value: value });
+    });
+}
+
+function displayEffectButtons() {
+    Array.from(effectControls.children).forEach(child => {
+        if (child.tagName !== 'DIV') { // Assuming checkboxes are in div containers
+            child.remove();
+        }
+    });
+
+    effects.forEach(effect => {
+        const button = document.createElement('button');
+        button.className = 'effect-button';
+        button.textContent = effect;
+        button.dataset.effect = effect;
+        button.dataset.active = 'true';
+        button.addEventListener('mouseenter', () => displayEffectImages(effect));
+        button.addEventListener('click', () => { toggleEffect(button); displayEffectImages(effect); });
+        
+        const checkboxDiv = document.querySelector(`.effect-control input[id="${effect}Checkbox"]`).closest('.effect-control');
+        checkboxDiv.insertAdjacentElement('afterend', button);
+    });
+}
+
+function toggleEffect(button) {
+    button.dataset.active = button.dataset.active === 'true' ? 'false' : 'true';
+    button.classList.toggle('inactive');
+}
+
+function displayEffectImages(effect) {
+    resultsContainer.innerHTML = '';
+    if (document.getElementById(`${effect}Checkbox`).checked) {
+        const images = processedImages[effect];
+        if (images && images.length > 0) {
+            images.forEach((imgData) => {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'canvas-wrapper';
+                const img = new Image();
+                img.src = imgData.dataUrl;
+                wrapper.appendChild(img);
+                resultsContainer.appendChild(wrapper);
+            });
+        } else {
+            resultsContainer.textContent = 'Processing...';
+        }
+    } else {
+        resultsContainer.textContent = 'Effect not selected';
+    }
+}
+
+function getEffectValue(effect, index, count) {
+    const t = index / (count - 1);
+    switch(effect) {
+        case 'brightness': return Math.floor(t * 510) - 255;
+        case 'hue': return Math.floor(t * 360);
+        case 'saturation': return t * 2;
+        case 'vintage': case 'ink': case 'vibrance': case 'denoise': case 'hexagonalPixelate': case 'invert':
+        case 'perspectiveTilt': case 'perspectiveSqueeze': case 'perspectiveCurve': case 'perspectiveFisheye':
+        case 'perspectiveRotate': case 'perspectiveSkew': case 'perspectiveWarp': case 'perspectiveZoom':
+        case 'perspectiveTunnel': case 'perspectiveSphere': case 'perspectiveCylinder': case 'perspectiveRipple':
+        case 'perspectiveVortex': case 'perspectiveFold': case 'perspectivePixelate': case 'perspectiveEmboss':
+        case 'perspectiveMosaic': case 'perspectiveOilPainting': case 'perspectivePosterize':
+            return t;
+        case 'bulgePinch': return [t, t * 2 - 1];
+        case 'swirl': return (t - 0.5) * 10;
+        case 'lensBlur': case 'triangularBlur': return t * 50;
+        case 'tiltShiftBlur': case 'zoomBlur': return [t, 1-t];
+        case 'edgeWork': return t * 10 + 1;
+        case 'dotScreen': case 'colorHalftone': return t * 10;
+        case 'perspectiveTwist': return t * Math.PI * 2;
+        case 'perspective': return [t, 1-t, t, 1-t];
+        case 'kaleidoscope': return Math.floor(t * 16) + 2;
+        case 'wavyDistortion': return [t * 50, (1-t) * 50, t * Math.PI * 2];
+        case 'blockDissolve': return Math.floor(t * 20) + 1;
+        case 'rgbShift': return [t * 10, (1-t) * 10, t * 10];
+        case 'chromaticAberration': return t * 20;
+        case 'droste': return [t * 5, (1-t) * 5, t * Math.PI * 2];
+        case 'running1': return [
+                t * 10,           
+                (1-t) * 5,        
+                t * Math.PI * 2,  // Leg swing
+                (1-t) * Math.PI   // Arm swing
+            ];
+        case 'running2': return [
+            t, // time
+            0.5 + t * 1.5, // speed
+            0.2 + t * 0.8 // intensity
+        ];
+        case 'running3': return t;
+        case 'running4': return t;
+        case 'running5': return t; 
+        case 'running6': return t;
+        case 'running7': return t;
+        case 'running8': return t;
+        case 'running9': return t; 
+        case 'running10': return t;
+        case 'running11': return t;
+        case 'running12': return t; 
+        case 'running13': return t; 
+        default: return t;
+    }
+}
+
+function loadImage() {
+    originalImage = new Image();
+    originalImage.onload = function() {
+        imageCanvas.width = originalImage.width;
+        imageCanvas.height = originalImage.height;
+        ctx.drawImage(originalImage, 0, 0);
+        originalImageData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height);
+        maskData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height); // Initialize maskData
+        size = { w: imageCanvas.width, h: imageCanvas.height }; // Initialize size
+        objectMask = matrix(imageCanvas.width, imageCanvas.height, false); // Initialize objectMask
+        window.uploadedImageData = originalImageData;
+        displaySelectedRegionsBorders();
+    }
+    originalImage.src = 'face.jpg'; // Ensure this path is correct
+}
+
+function handleCanvasClick(event) {
+    const rect = imageCanvas.getBoundingClientRect();
+    const x = Math.floor((event.clientX - rect.left) / (rect.width / imageCanvas.width));
+    const y = Math.floor((event.clientY - rect.top) / (rect.height / imageCanvas.height));
+    performMagicWandSelection(x, y);
+}
+
+function performMagicWandSelection(startX, startY) {
+    const imageData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height);
+    const worker = new Worker('magicWand1Worker.js');
+    worker.postMessage({
+        imageData: imageData,
+        startX: startX,
+        startY: startY,
+        tolerance: tolerance,
+        mode: magicWandMode
+    });
+    worker.onmessage = function(e) {
+        let newRegion = e.data.selectedRegion;
+        console.log(newRegion);
+        updateSelectedRegions(newRegion);
+        updateObjectMask(newRegion); // Update object mask with new region
+        displaySelectedRegionsBorders();
+    };
+}
+
+function updateSelectedRegions(newRegion) {
+    if (magicWandMode === 'add') {
+        selectedRegions.push(newRegion);
+    } else if (magicWandMode === 'subtract') {
+        selectedRegions = selectedRegions.map(region => 
+            region.filter(pixel => !newRegion.includes(pixel))
+        );
+    } else if (magicWandMode === 'invert') {
+        selectedRegions = selectedRegions.map(region => {
+            let invertedRegion = region.filter(pixel => !newRegion.includes(pixel))
+                .concat(newRegion.filter(pixel => !region.includes(pixel)));
+            return invertedRegion;
+        });
+    }
+}
+
+function updateObjectMask(newRegion) {
+    if (!objectMask) {
+        objectMask = matrix(imageCanvas.width, imageCanvas.height, false);
+    }
+    newRegion.forEach(pixelIndex => {
+        const x = pixelIndex % imageCanvas.width;
+        const y = Math.floor(pixelIndex / imageCanvas.width);
+        objectMask[y][x] = true;
+    });
+}
+
+function displaySelectedRegionsBorders() {
+    ctx.clearRect(0, 0, imageCanvas.width, imageCanvas.height);
+    ctx.drawImage(originalImage, 0, 0);
+    ctx.strokeStyle = 'red';
+    ctx.lineWidth = 1;
+    selectedRegions.forEach(region => {
+        ctx.beginPath();
+        region.forEach(pixelIndex => {
+            const x = pixelIndex % imageCanvas.width;
+            const y = Math.floor(pixelIndex / imageCanvas.width);
+            ctx.rect(x, y, 1, 1);
+        });
+        ctx.stroke();
+    });
+}
+
+function startResizing() {
+    if (!originalImage || !originalImage.complete || !originalImage.naturalWidth) {
+        alert('Image not loaded.');
+        return;
+    }
+
+    if (!originalImageData) {
+        alert('No image data available.');
+        return;
+    }
+
+    const toWidth = parseInt(widthInput.value);
+    const toHeight = parseInt(heightInput.value);
+
+    if (isNaN(toWidth) || isNaN(toHeight)) {
+        alert('Please enter valid width and height values.');
+        return;
+    }
+
+    if (toWidth >= originalImage.width && toHeight >= originalImage.height) {
+        alert('Please enter at least one dimension smaller than the original image.');
+        return;
+    }
+
+    const resizedImageData = new ImageData(
+        new Uint8ClampedArray(originalImageData.data),
+        originalImageData.width,
+        originalImageData.height
+    );
+
+    resizeImage(
+        resizedImageData,
+        toWidth,
+        toHeight,
+        ({ step, steps }) => {
+            progressDiv.textContent = `Resizing... ${Math.round((step / steps) * 100)}%`;
+        }
+    ).then(() => {
+        imageCanvas.width = toWidth;
+        imageCanvas.height = toHeight;
+        ctx.putImageData(resizedImageData, 0, 0);
+        progressDiv.textContent = 'Resizing complete!';
+    });
+}
+
+function toggleDrawMode() {
+    drawMode = !drawMode;
+    toggleDrawButton.textContent = drawMode ? 'Disable Draw' : 'Enable Draw';
+}
+
+function startDrawing(e) {
+    if (!drawMode) return;
+    isDrawing = true;
+    draw(e);
+}
+
+function draw(e) {
+    if (!isDrawing || !drawMode) return;
+    const rect = imageCanvas.getBoundingClientRect();
+    const x = Math.floor(e.clientX - rect.left);
+    const y = Math.floor(e.clientY - rect.top);
+
+    ctx.fillStyle = 'rgba(255, 0, 0, 0.5)';
+    ctx.beginPath();
+    ctx.arc(x, y, 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (objectMask) {
+        for (let i = -5; i <= 5; i++) {
+            for (let j = -5; j <= 5; j++) {
+                if (x + i >= 0 && x + i < imageCanvas.width && y + j >= 0 && y + j < imageCanvas.height) {
+                    objectMask[y + j][x + i] = true;
+                }
+            }
+        }
+    }
+}
+
+function stopDrawing() {
+    isDrawing = false;
+}
+
+function performObjectRemoval() {
+    const imageData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height);
+    worker = new Worker('removeobjectworker.js');
+    worker.onmessage = function(event) {
+        const { img, size } = event.data;
+        imageCanvas.width = size.w;
+        imageCanvas.height = size.h;
+        ctx.putImageData(img, 0, 0);
+        console.log('Object removal complete');
+    };
+    worker.postMessage({ imageData, objectMask });
+}
+
+// Add the necessary functions for resizing and object removal here
+function getPixelDeleteEnergy() {
+    const numColors = 3;
+    const maxColorDistance = 255;
+    const numNeighbors = 2;
+    const multiplier = 2;
+    const maxSeamSize = Math.max(1500, 1500);
+    return -1 * multiplier * numNeighbors * maxSeamSize * numColors * (maxColorDistance ** 2);
+}
+
+function matrix(w, h, filler) {
+    return new Array(h).fill(null).map(() => new Array(w).fill(filler));
+}
+
+function getPixel(img, { x, y }) {
+    const index = (y * img.width + x) * 4;
+    return [
+        img.data[index],
+        img.data[index + 1],
+        img.data[index + 2],
+        img.data[index + 3]
+    ];
+}
+
+function setPixel(img, { x, y }, color) {
+    const index = (y * img.width + x) * 4;
+    img.data[index] = color[0];
+    img.data[index + 1] = color[1];
+    img.data[index + 2] = color[2];
+    img.data[index + 3] = color[3];
+}
+
+function getPixelEnergy(left, middle, right) {
+    const [mR, mG, mB, mA] = middle;
+
+    // Check if this pixel is marked for removal
+    const maskIndex = (middle.y * size.w + middle.x) * 4;
+    if (maskData && maskData.data[maskIndex + 3] > 0) {
+        return getPixelDeleteEnergy(); // Very low energy for marked pixels
+    }
+
+    let lEnergy = 0;
+    if (left) {
+        const [lR, lG, lB] = left;
+        lEnergy = (lR - mR) ** 2 + (lG - mG) ** 2 + (lB - mB) ** 2;
+    }
+
+    let rEnergy = 0;
+    if (right) {
+        const [rR, rG, rB] = right;
+        rEnergy = (rR - mR) ** 2 + (rG - mG) ** 2 + (rB - mB) ** 2;
+    }
+
+    return mA > 244 ? (lEnergy + rEnergy) : getPixelDeleteEnergy();
+}
+
+function getPixelEnergyH(img, { w }, { x, y }) {
+    const left = (x - 1) >= 0 ? getPixel(img, { x: x - 1, y }) : null;
+    const middle = getPixel(img, { x, y });
+    const right = (x + 1) < w ? getPixel(img, { x: x + 1, y }) : null;
+    return getPixelEnergy(left, middle, right);
+}
+
+function getPixelEnergyV(img, { h }, { x, y }) {
+    const top = (y - 1) >= 0 ? getPixel(img, { x, y: y - 1 }) : null;
+    const middle = getPixel(img, { x, y });
+    const bottom = (y + 1) < h ? getPixel(img, { x, y: y + 1 }) : null;
+    return getPixelEnergy(top, middle, bottom);
+}
+
+function calculateEnergyMapH(img, { w, h }) {
+    const energyMap = matrix(w, h, Infinity);
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            energyMap[y][x] = getPixelEnergyH(img, { w, h }, { x, y });
+        }
+    }
+    return energyMap;
+}
+
+function calculateEnergyMapV(img, { w, h }) {
+    const energyMap = matrix(w, h, Infinity);
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            energyMap[y][x] = getPixelEnergyV(img, { w, h }, { x, y });
+        }
+    }
+    return energyMap;
+}
+
+function reCalculateEnergyMapH(img, { w, h }, energyMap, seam) {
+    seam.forEach(({ x: seamX, y: seamY }) => {
+        for (let x = seamX; x < (w - 1); x++) {
+            energyMap[seamY][x] = energyMap[seamY][x + 1];
+        }
+        energyMap[seamY][seamX] = getPixelEnergyH(img, { w, h }, { x: seamX, y: seamY });
+    });
+    return energyMap;
+}
+
+function reCalculateEnergyMapV(img, { w, h }, energyMap, seam) {
+    seam.forEach(({ x: seamX, y: seamY }) => {
+        for (let y = seamY; y < (h - 1); y++) {
+            energyMap[y][seamX] = energyMap[y + 1][seamX];
+        }
+        energyMap[seamY][seamX] = getPixelEnergyV(img, { w, h }, { x: seamX, y: seamY });
+    });
+    return energyMap;
+}
+
+function findLowEnergySeamH(energyMap, { w, h }) {
+    const seamsMap = matrix(w, h, null);
+
+    for (let x = 0; x < w; x++) {
+        seamsMap[0][x] = {
+            energy: energyMap[0][x],
+            coordinate: { x, y: 0 },
+            previous: null,
+        };
+    }
+
+    for (let y = 1; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            let minPrevEnergy = Infinity;
+            let minPrevX = x;
+            for (let i = (x - 1); i <= (x + 1); i++) {
+                if (i >= 0 && i < w && seamsMap[y - 1][i].energy < minPrevEnergy) {
+                    minPrevEnergy = seamsMap[y - 1][i].energy;
+                    minPrevX = i;
+                }
+            }
+
+            seamsMap[y][x] = {
+                energy: minPrevEnergy + energyMap[y][x],
+                coordinate: { x, y },
+                previous: { x: minPrevX, y: y - 1 },
+            };
+        }
+    }
+
+    let lastMinCoordinate = null;
+    let minSeamEnergy = Infinity;
+    for (let x = 0; x < w; x++) {
+        if (seamsMap[h - 1][x].energy < minSeamEnergy) {
+            minSeamEnergy = seamsMap[h - 1][x].energy;
+            lastMinCoordinate = { x, y: h - 1 };
+        }
+    }
+
+    const seam = [];
+    if (!lastMinCoordinate) {
+        return seam;
+    }
+
+    let currentSeam = seamsMap[lastMinCoordinate.y][lastMinCoordinate.x];
+    while (currentSeam) {
+        seam.push(currentSeam.coordinate);
+        const prevMinCoordinates = currentSeam.previous;
+        if (!prevMinCoordinates) {
+            currentSeam = null;
+        } else {
+            currentSeam = seamsMap[prevMinCoordinates.y][prevMinCoordinates.x];
+        }
+    }
+
+    return seam;
+}
+
+function findLowEnergySeamV(energyMap, { w, h }) {
+    const seamsMap = matrix(w, h, null);
+
+    for (let y = 0; y < h; y++) {
+        seamsMap[y][0] = {
+            energy: energyMap[y][0],
+            coordinate: { x: 0, y },
+            previous: null,
+        };
+    }
+
+    for (let x = 1; x < w; x++) {
+        for (let y = 0; y < h; y++) {
+            let minPrevEnergy = Infinity;
+            let minPrevY = y;
+            for (let i = (y - 1); i <= (y + 1); i++) {
+                if (i >= 0 && i < h && seamsMap[i][x - 1].energy < minPrevEnergy) {
+                    minPrevEnergy = seamsMap[i][x - 1].energy;
+                    minPrevY = i;
+                }
+            }
+
+            seamsMap[y][x] = {
+                energy: minPrevEnergy + energyMap[y][x],
+                coordinate: { x, y },
+                previous: { x: x - 1, y: minPrevY },
+            };
+        }
+    }
+
+    let lastMinCoordinate = null;
+    let minSeamEnergy = Infinity;
+    for (let y = 0; y < h; y++) {
+        if (seamsMap[y][w - 1].energy < minSeamEnergy) {
+            minSeamEnergy = seamsMap[y][w - 1].energy;
+            lastMinCoordinate = { x: w - 1, y };
+        }
+    }
+
+    const seam = [];
+    if (!lastMinCoordinate) {
+        return seam;
+    }
+
+    let currentSeam = seamsMap[lastMinCoordinate.y][lastMinCoordinate.x];
+    while (currentSeam) {
+        seam.push(currentSeam.coordinate);
+        const prevMinCoordinates = currentSeam.previous;
+        if (!prevMinCoordinates) {
+            currentSeam = null;
+        } else {
+            currentSeam = seamsMap[prevMinCoordinates.y][prevMinCoordinates.x];
+        }
+    }
+
+    return seam;
+}
+
+function deleteSeamH(img, seam, { w }) {
+    seam.forEach(({ x: seamX, y: seamY }) => {
+        for (let x = seamX; x < (w - 1); x++) {
+            const nextPixel = getPixel(img, { x: x + 1, y: seamY });
+            setPixel(img, { x, y: seamY }, nextPixel);
+        }
+    });
+}
+
+function deleteSeamV(img, seam, { h }) {
+    seam.forEach(({ x: seamX, y: seamY }) => {
+        for (let y = seamY; y < (h - 1); y++) {
+            const nextPixel = getPixel(img, { x: seamX, y: y + 1 });
+            setPixel(img, { x: seamX, y }, nextPixel);
+        }
+    });
+}
+
+async function resizeImageWidth(img, toSize, onIteration) {
+    const pxToRemove = img.width - toSize;
+    if (pxToRemove < 0) {
+        throw new Error('Upsizing is not supported');
+    }
+
+    let energyMap = null;
+    let seam = null;
+
+    for (let i = 0; i < pxToRemove; i++) {
+        energyMap = energyMap && seam
+            ? reCalculateEnergyMapH(img, size, energyMap, seam)
+            : calculateEnergyMapH(img, size);
+
+        seam = findLowEnergySeamH(energyMap, size);
+
+        deleteSeamH(img, seam, size);
+
+        if (onIteration) {
+            await onIteration({
+                energyMap,
+                seam,
+                img,
+                size,
+                step: i,
+                steps: pxToRemove,
+            });
+        }
+
+        size.w -= 1;
+
+        await new Promise(resolve => setTimeout(resolve, 1));
+    }
+}
+
+async function resizeImageHeight(img, toSize, onIteration) {
+    const pxToRemove = img.height - toSize;
+    if (pxToRemove < 0) {
+        throw new Error('Upsizing is not supported');
+    }
+
+    let energyMap = null;
+    let seam = null;
+
+    for (let i = 0; i < pxToRemove; i++) {
+        energyMap = energyMap && seam
+            ? reCalculateEnergyMapV(img, size, energyMap, seam)
+            : calculateEnergyMapV(img, size);
+
+        seam = findLowEnergySeamV(energyMap, size);
+
+        deleteSeamV(img, seam, size);
+
+        if (onIteration) {
+            await onIteration({
+                energyMap,
+                seam,
+                img,
+                size,
+                step: i,
+                steps: pxToRemove,
+            });
+        }
+
+        size.h -= 1;
+
+        await new Promise(resolve => setTimeout(resolve, 1));
+    }
+}
+
+async function resizeImage(img, toWidth, toHeight, onIteration) {
+    const pxToRemoveH = img.width - toWidth;
+    const pxToRemoveV = img.height - toHeight;
+
+    size = { w: img.width, h: img.height };
+
+    const globalSteps = pxToRemoveH + pxToRemoveV;
+    let globalStep = 0;
+
+    const onResizeIteration = async (onIterationArgs) => {
+        const {
+            seam,
+            img: onIterationImg,
+            size: onIterationSize,
+            energyMap,
+        } = onIterationArgs;
+
+        globalStep += 1;
+
+        if (!onIteration) {
+            return;
+        }
+
+        await onIteration({
+            seam,
+            img: onIterationImg,
+            size: onIterationSize,
+            energyMap,
+            step: globalStep,
+            steps: globalSteps,
+        });
+    };
+
+    await resizeImageWidth(img, toWidth, onResizeIteration);
+    await resizeImageHeight(img, toHeight, onResizeIteration);
+}
+    </script>
+
+</body>
+</html>

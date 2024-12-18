@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Optimized Image Processing</title>
+    <style>
+        body {display: flex; margin: 0; padding: 0; height: 100vh; font-family: Arial, sans-serif;}
+        #sidebar {width: 300px; background-color: #f0f0f0; padding: 20px; overflow-y: auto; height: 100vh; box-sizing: border-box; box-shadow: 2px 0 5px rgba(0,0,0,0.1); min-width: 200px; max-width: 50%;}
+        #mainContent {flex-grow: 1; padding: 20px; overflow-y: auto;}
+        .controls {display: flex; flex-direction: column; gap: 1px; margin-bottom: 20px;}
+        .controls input, .controls button, .effect-button {width: 100%; padding: 10px; margin-bottom: 10px; border: none; border-radius: 5px; background-color: #ffffff; transition: all 0.3s ease;}
+        .controls button, .effect-button {cursor: pointer; text-align: center; font-weight: bold; color: #333;}
+        .controls button:hover, .effect-button:hover {background-color: #f5f5f5; box-shadow: 0 4px 8px rgba(0,0,0,0.15);}
+        #effectControls {display: flex; flex-direction: column; gap: 1px;}
+        .effect-button {opacity: 0.8;}
+        .effect-button.processed {opacity: 1; background-color: #e6f3ff;}
+        .effect-button.inactive {opacity: 0.5; background-color: #f0f0f0;}
+        #resultsContainer {display: flex; flex-wrap: wrap;}
+        .canvas-wrapper {display: inline-block; 
+            width: 100px;
+            height: 100px;
+            margin: 5px; 
+            text-align: center;}
+        #masterCheckboxControl {margin-bottom: 15px;}
+        .canvas-wrapper img{
+    
+            width: 100px;
+            height: 100px;
+        
+        }
+        input[type="file"], input[type="number"] {background-color: #ffffff; border: 1px solid #ddd;}
+        label {margin-bottom: 5px; font-weight: bold; color: #555;}
+        #imageCanvas {
+    max-width: 100%;
+    border: 1px solid #ddd;
+    margin-bottom: 20px;
+}
+   
+    </style>
+</head>
+<body>
+    <div id="sidebar">
+        <div class="controls">
+            <input type="file" id="imageUpload" accept="image/*">
+            <label for="imageCount">Number of images per effect:</label>
+            <input type="number" id="imageCount" min="1" max="100" value="10">
+            <button id="processButton">Process Image</button>
+            <button id="fastProcessButton">Fast Process</button>
+        </div>
+        <div id="masterCheckboxControl">
+            <input type="checkbox" id="masterCheckbox" checked>
+            <label for="masterCheckbox">Select/Unselect All</label>
+        </div>
+        <div id="effectControls"></div>
+    </div>
+    <div id="mainContent">
+        <canvas id="imageCanvas"></canvas>
+        <div id="resultsContainer"></div>
+    </div>
+
+    <script>
+let clickedPoints = []; // Array to store clicked points
+
+
+const imageCanvas = document.getElementById('imageCanvas');
+const ctx = imageCanvas.getContext('2d');
+let animationPoints = [];
+let uploadedImage = null;
+function displayUploadedImage(img) {
+    uploadedImage = img;
+    imageCanvas.width = img.width;
+    imageCanvas.height = img.height;
+    ctx.drawImage(img, 0, 0);
+    animationPoints = []; // Clear existing points
+    drawAnimationPoints();
+}
+
+imageCanvas.addEventListener('click', (e) => {
+    if (!uploadedImage) return;
+    const rect = imageCanvas.getBoundingClientRect();
+    const scaleX = uploadedImage.width / rect.width;
+    const scaleY = uploadedImage.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
+    clickedPoints.push({ x, y });
+    console.log(`Clicked point added: x=${x}, y=${y}`);
+    drawClickedPoints();
+});
+
+
+
+function createAnimationPoints(img, numPoints = 4, numFrames) {
+    animationPoints = []; // Clear and create new points
+    for (let frame = 0; frame < numFrames; frame++) {
+        let framePoints = [];
+        for (let i = 0; i < numPoints; i++) {
+            framePoints.push({
+                x: Math.random() * img.width,
+                y: Math.random() * img.height
+            });
+        }
+        animationPoints.push(framePoints);
+    }
+}
+
+function drawAnimationPoints() {
+    ctx.clearRect(0, 0, imageCanvas.width, imageCanvas.height);
+    if (uploadedImage) {
+        ctx.drawImage(uploadedImage, 0, 0);
+    }
+    ctx.fillStyle = 'red';
+    for (const point of animationPoints) {
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+        const imageUpload = document.getElementById('imageUpload');
+        const resultsContainer = document.getElementById('resultsContainer');
+        const effectControls = document.getElementById('effectControls');
+        const imageCountInput = document.getElementById('imageCount');
+        const processButton = document.getElementById('processButton');
+        const masterCheckbox = document.getElementById('masterCheckbox');
+        const fastProcessButton = document.getElementById('fastProcessButton');
+        imageUpload.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+            if (file) {
+                const img = new Image();
+                img.onload = function() {
+                    displayUploadedImage(this);
+                }
+                img.src = URL.createObjectURL(file);
+            }
+        });
+            const effects = [
+
+            //  'running1',
+            //  'running2',
+            //  'perspectiveTilt1',
+            //  'perspectiveTilt2',
+            //  'rotateAroundPoints',
+            'perspectiverotateAroundPoints',
+            'perspectiveextend',
+            'perspectiveclickedpoints',
+            'perspectiveSkew',
+            'perspectivesqueeze1Worker',
+            
+            // 'squeeze'
+
+            ];
+           
+     const animationEffects = [
+    // 'perspectiveTilt'
+            ];
+
+        const workers = {};
+        effects.forEach(effect => { workers[effect] = new Worker(`${effect}Worker.js`); });
+
+            let processedImages = {};
+            processButton.addEventListener('click', () => processImageWithMethod(processImage));
+            fastProcessButton.addEventListener('click', () => processImageWithMethod(fastProcessImage));
+            masterCheckbox.addEventListener('change', toggleAllEffects);
+            const animationControlDiv = document.createElement('div');
+            animationControlDiv.className = 'effect-control';
+            const animationCheckbox = document.createElement('input');
+            animationCheckbox.type = 'checkbox';
+            animationCheckbox.id = 'animationCheckbox';
+            animationCheckbox.addEventListener('change', toggleAnimationEffects);
+            const animationLabel = document.createElement('label');
+            animationLabel.htmlFor = 'animationCheckbox';
+            animationLabel.textContent = 'Animation';
+            animationControlDiv.appendChild(animationCheckbox);
+            animationControlDiv.appendChild(animationLabel);
+            effectControls.appendChild(animationControlDiv);
+        effects.forEach(effect => {
+            const controlDiv = document.createElement('div');
+            controlDiv.className = 'effect-control';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.id = `${effect}Checkbox`;
+            checkbox.checked = true;
+            checkbox.addEventListener('change', updateMasterCheckbox);
+            const label = document.createElement('label');
+            label.htmlFor = `${effect}Checkbox`;
+            label.textContent = effect;
+            controlDiv.appendChild(checkbox);
+            controlDiv.appendChild(label);
+            effectControls.appendChild(controlDiv);
+        });
+    
+        function toggleAnimationEffects() {
+            const isChecked = document.getElementById('animationCheckbox').checked;
+            animationEffects.forEach(effect => {
+                const checkbox = document.getElementById(effect + 'Checkbox');
+                if (checkbox) {
+                    checkbox.checked = isChecked;
+                }
+            });
+            updateMasterCheckbox();
+        }
+    
+        function toggleAllEffects() {
+            const isChecked = masterCheckbox.checked;
+            effects.forEach(effect => {
+                if (!animationEffects.includes(effect)) {
+                    document.getElementById(effect + 'Checkbox').checked = isChecked;
+                }
+            });
+        }
+
+        function updateMasterCheckbox() {
+            const effectCheckboxes = effects.filter(effect => !animationEffects.includes(effect));
+            const allChecked = effectCheckboxes.every(effect => document.getElementById(effect + 'Checkbox').checked);
+            const anyChecked = effectCheckboxes.some(effect => document.getElementById(effect + 'Checkbox').checked);
+            masterCheckbox.checked = allChecked;
+            masterCheckbox.indeterminate = anyChecked && !allChecked;
+        }
+
+        function updateEffectDisplay(effect) {
+            const effectButton = document.querySelector(`.effect-button[data-effect="${effect}"]`);
+            if (effectButton) effectButton.classList.add('processed');
+        }
+
+        async function fastProcessImage(img) {
+            processedImages = {};
+
+
+            const imageCount = parseInt(imageCountInput.value);
+            createAnimationPoints(img, 4, imageCount);  // Create points for all frames
+
+            displayEffectButtons();
+            const effectPromises = effects.filter(effect => document.getElementById(`${effect}Checkbox`).checked).map(async (effect) => {
+                processedImages[effect] = [];
+                for (let i = 0; i < imageCount; i++) {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
+                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    let value = getEffectValue(effect, i, imageCount);
+                    try {
+                        const processedImageData = await applyEffect(effect, imageData, value, clickedPoints);
+                        ctx.putImageData(processedImageData, 0, 0);
+                        processedImages[effect].push({ value: value, dataUrl: canvas.toDataURL() });
+                        updateEffectDisplay(effect);
+                    } catch (error) {
+                        console.error(`Error processing effect ${effect} for image ${i+1}:`, error.message);
+                    }
+                }
+            });
+            await Promise.all(effectPromises);
+            displayProcessedImages();
+        }
+
+        function processImageWithMethod(processingMethod) {
+            const file = imageUpload.files[0];
+            if (file) {
+                const objectUrl = URL.createObjectURL(file);
+                const img = new Image();
+                img.onload = function() {
+                    URL.revokeObjectURL(objectUrl);
+                    processingMethod(img);
+                }
+                img.src = objectUrl;
+            } else {
+                alert('Please select an image first.');
+            }
+        }
+
+        async function processImage(img) {
+            processedImages = {};
+
+
+            const imageCount = parseInt(imageCountInput.value);
+            createAnimationPoints(img, 4, imageCount);  // Create points for all frames
+
+            displayEffectButtons();
+            for (const effect of effects.filter(effect => document.getElementById(`${effect}Checkbox`).checked)) {
+                processedImages[effect] = [];
+                for (let i = 0; i < imageCount; i++) {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
+                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    let value = getEffectValue(effect, i, imageCount);
+                    try {
+                        const processedImageData = await applyEffect(effect, imageData, value, clickedPointsr);
+                        ctx.putImageData(processedImageData, 0, 0);
+                        processedImages[effect].push({ value: value, dataUrl: canvas.toDataURL() });
+                        updateEffectDisplay(effect);
+                    } catch (error) {
+                        console.error(`Error processing effect ${effect} for image ${i+1}:`, error);
+                    }
+                }
+            }
+        }
+
+        function displayProcessedImages() {
+            resultsContainer.innerHTML = '';
+            for (const effect in processedImages) {
+                if (document.getElementById(`${effect}Checkbox`).checked) {
+                    const images = processedImages[effect];
+                    if (images && images.length > 0) {
+                        const effectDiv = document.createElement('div');
+                        effectDiv.className = 'effect-results';
+                        const effectTitle = document.createElement('h3');
+                        effectTitle.textContent = effect;
+                        effectDiv.appendChild(effectTitle);
+                        images.forEach((imgData) => {
+                            const wrapper = document.createElement('div');
+                            wrapper.className = 'canvas-wrapper';
+                            const img = new Image();
+                            img.src = imgData.dataUrl;
+                            wrapper.appendChild(img);
+                            effectDiv.appendChild(wrapper);
+                        });
+                        resultsContainer.appendChild(effectDiv);
+                    }
+                }
+            }
+        }
+  
+function applyEffect(effect, imageData, value, clickedPoints) {
+    return new Promise((resolve, reject) => {
+        if (!workers[effect]) {
+            reject(new Error(`Worker for effect ${effect} not found`));
+            return;
+        }
+        workers[effect].onmessage = function(e) {
+            if (e.data.error) {
+                reject(new Error(`Error in ${effect} worker: ${e.data.error}`));
+            } else {
+                resolve(e.data.imageData);
+            }
+        };
+        workers[effect].onerror = function(error) {
+            reject(new Error(`Error in ${effect} worker: ${error.message}`));
+        };
+        console.log("Sending clicked points to worker:", clickedPoints);
+        console.log("Sending to worker:", { effect, valueX: value.tiltX, valueY: value.tiltY, points: clickedPoints });
+
+        workers[effect].postMessage({ 
+            imageData: imageData, 
+            value: value,
+            clickedPoints: clickedPoints
+        });
+    });
+}
+function drawClickedPoints() {
+    ctx.clearRect(0, 0, imageCanvas.width, imageCanvas.height);
+    if (uploadedImage) {
+        ctx.drawImage(uploadedImage, 0, 0);
+    }
+    ctx.fillStyle = 'red';
+    for (const point of clickedPoints) {
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+        function displayEffectButtons() {
+   
+    Array.from(effectControls.children).forEach(child => {
+        if (child.tagName !== 'DIV') { // Assuming checkboxes are in div containers
+            child.remove();
+        }
+    });
+
+    effects.forEach(effect => {
+        const button = document.createElement('button');
+        button.className = 'effect-button';
+        button.textContent = effect;
+        button.dataset.effect = effect;
+        button.dataset.active = 'true';
+        button.addEventListener('mouseenter', () => displayEffectImages(effect));
+        button.addEventListener('click', () => { toggleEffect(button); displayEffectImages(effect); });
+        
+        const checkboxDiv = document.querySelector(`.effect-control input[id="${effect}Checkbox"]`).closest('.effect-control');
+        checkboxDiv.insertAdjacentElement('afterend', button);
+    });
+}
+        function toggleEffect(button) {
+            button.dataset.active = button.dataset.active === 'true' ? 'false' : 'true';
+            button.classList.toggle('inactive');
+        }
+
+        function displayEffectImages(effect) {
+            resultsContainer.innerHTML = '';
+            if (document.getElementById(`${effect}Checkbox`).checked) {
+                const images = processedImages[effect];
+                if (images && images.length > 0) {
+                    images.forEach((imgData) => {
+                        const wrapper = document.createElement('div');
+                        wrapper.className = 'canvas-wrapper';
+                        const img = new Image();
+                        img.src = imgData.dataUrl;
+                        wrapper.appendChild(img);
+                        resultsContainer.appendChild(wrapper);
+                    });
+                } else {
+                    resultsContainer.textContent = 'Processing...';
+                }
+            } else {
+                resultsContainer.textContent = 'Effect not selected';
+            }
+        }
+
+        function getEffectValue(effect, index, count) {
+            const t = index / (count - 1);
+            switch(effect) {
+
+                // case 'running1': return [
+                //         t * 10,           
+                //         (1-t) * 5,        
+                //         t * Math.PI * 2,  // Leg swing
+                //         (1-t) * Math.PI   // Arm swing
+                //     ];
+                // case 'running2': return [
+                //     t, // time
+                //     0.5 + t * 1.5, // speed
+                //     0.2 + t * 0.8 // intensity
+                // ];
+                // case 'perspectiveTilt1':
+                // return {
+                //     tiltX: Math.sin(t * Math.PI * 2) * 0.5,
+                //     tiltY: Math.cos(t * Math.PI * 2) * 0.5
+                // };
+                // case 'perspectiveTilt2':
+                // return {
+                //     tiltX: Math.sin(t * Math.PI * 2) * 0.2,
+                //     tiltY: Math.cos(t * Math.PI * 2) * 0.2
+                // };
+                case 'perspectiverotateAroundPoints':
+                return {
+                    rotation: Math.sin(t * Math.PI * 2) * 180 // Rotation in degrees
+                };
+                case 'perspectivesqueeze1':
+    return {
+        squeezeX: Math.sin(t * Math.PI * 2) * 0.3,
+        squeezeY: Math.cos(t * Math.PI * 2) * 0.3,
+        perspectiveX: Math.sin(t * Math.PI) * 0.2,
+        perspectiveY: Math.cos(t * Math.PI) * 0.2
+    };
+
+case 'perspectiveSkew':
+    return {
+        skewX: Math.sin(t * Math.PI * 2) * 0.3,
+        skewY: Math.cos(t * Math.PI * 2) * 0.3,
+        perspectiveX: Math.sin(t * Math.PI) * 0.2,
+        perspectiveY: Math.cos(t * Math.PI) * 0.2
+    };
+
+case 'perspectiveclickedpoints':
+    return {
+        perspectiveX: Math.sin(t * Math.PI * 2) * 0.3,
+        perspectiveY: Math.cos(t * Math.PI * 2) * 0.3,
+        intensity: 0.5 + Math.sin(t * Math.PI) * 0.5  // This could control the strength of the effect around clicked points
+    };
+
+case 'perspectiveextend':
+    return {
+        extendX: 1 + Math.sin(t * Math.PI * 2) * 0.2,
+        extendY: 1 + Math.cos(t * Math.PI * 2) * 0.2,
+        perspectiveX: Math.sin(t * Math.PI) * 0.2,
+        perspectiveY: Math.cos(t * Math.PI) * 0.2
+    };
+                // case 'squeeze':
+                // return {
+                //     squeezeX: 1 + Math.sin(t * Math.PI * 2) * 0.3,
+                //     squeezeY: 1 + Math.cos(t * Math.PI * 2) * 0.3
+                // };
+                    default: return t;
+                }
+        }
+
+        
+    </script>
+</body>
+</html>

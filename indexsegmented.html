@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Segmentation Comparison</title>
+    <style>
+        .image-container, .segments-container {
+            display: flex;
+            justify-content: space-around;
+            flex-wrap: wrap;
+        }
+        .image-wrapper, .segment-wrapper {
+            margin: 10px;
+            text-align: center;
+        }
+        img, canvas {
+            max-width: 100%;
+            height: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>Image Segmentation Comparison</h1>
+    <div class="image-container">
+        <div class="image-wrapper">
+            <h2>Original Image</h2>
+            <img id="originalImage" src="face.jpg" alt="Original Image">
+        </div>
+        <div class="image-wrapper">
+            <h2>Segmented Image</h2>
+            <img id="segmentedImage" alt="Segmented Image">
+        </div>
+        <div class="image-wrapper">
+            <h2>Worker Generated Image</h2>
+            <img id="workerImage" alt="Worker Generated Image">
+        </div>
+    </div>
+
+    <h2>Color Segments</h2>
+    <div id="segmentsContainer" class="segments-container"></div>
+
+    <script>
+
+let originalImageData;
+
+
+function separateColorSegments(segmentedImageData) {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = segmentedImageData.width;
+    canvas.height = segmentedImageData.height;
+    ctx.putImageData(segmentedImageData, 0, 0);
+
+    const colorMap = new Map();
+    const segmentedData = segmentedImageData.data;
+    const originalData = originalImageData.data;
+
+    // Identify unique colors
+    for (let i = 0; i < segmentedData.length; i += 4) {
+        const r = segmentedData[i];
+        const g = segmentedData[i + 1];
+        const b = segmentedData[i + 2];
+        const a = segmentedData[i + 3];
+
+        if (a > 0) {
+            const color = `${r},${g},${b}`;
+            if (!colorMap.has(color)) {
+                colorMap.set(color, []);
+            }
+            colorMap.get(color).push(i);
+        }
+    }
+
+    const segmentsContainer = document.getElementById('segmentsContainer');
+    segmentsContainer.innerHTML = ''; // Clear previous segments
+
+    // Create separate canvases for each color
+    colorMap.forEach((indices, color) => {
+        const segmentCanvas = document.createElement('canvas');
+        segmentCanvas.width = canvas.width;
+        segmentCanvas.height = canvas.height;
+        const segmentCtx = segmentCanvas.getContext('2d');
+        const segmentImageData = segmentCtx.createImageData(canvas.width, canvas.height);
+        const segmentData = segmentImageData.data;
+
+        indices.forEach(i => {
+            segmentData[i] = originalData[i];
+            segmentData[i + 1] = originalData[i + 1];
+            segmentData[i + 2] = originalData[i + 2];
+            segmentData[i + 3] = 255; // Full opacity
+        });
+
+        segmentCtx.putImageData(segmentImageData, 0, 0);
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'segment-wrapper';
+        wrapper.appendChild(segmentCanvas);
+        
+        const label = document.createElement('p');
+        label.textContent = `Segment ${colorMap.size - [...colorMap.keys()].indexOf(color)}`;
+        wrapper.appendChild(label);
+
+        segmentsContainer.appendChild(wrapper);
+    });
+}
+
+
+
+
+
+
+
+
+        // Assuming you have a worker set up for image processing
+        const worker = new Worker('js/segmentation17Worker.js');
+
+        // Load the original image
+        const originalImage = document.getElementById('originalImage');
+        originalImage.onload = function() {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = originalImage.width;
+    canvas.height = originalImage.height;
+    ctx.drawImage(originalImage, 0, 0);
+    originalImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+    worker.postMessage({
+        imageData: originalImageData,
+        value: 30,
+        debugMode: false
+    });
+};
+        // Handle the processed data from the worker
+        worker.onmessage = function(e) {
+            if (e.data.imageData) {
+                // Display the segmented image
+                const segmentedImage = document.getElementById('segmentedImage');
+                const canvas = document.createElement('canvas');
+                canvas.width = e.data.imageData.width;
+                canvas.height = e.data.imageData.height;
+                const ctx = canvas.getContext('2d');
+                ctx.putImageData(e.data.imageData, 0, 0);
+                segmentedImage.src = canvas.toDataURL();
+
+                // For this example, we're using the same data for the worker image
+                // In a real scenario, you might have different processing for this
+                const workerImage = document.getElementById('workerImage');
+                workerImage.src = canvas.toDataURL();
+
+                // Separate color segments
+                separateColorSegments(e.data.imageData);
+            } else if (e.data.error) {
+                console.error('Worker error:', e.data.error);
+            }
+        };
+
+        // let originalImageData;
+
+        // function separateColorSegments(imageData) {
+        //     const canvas = document.createElement('canvas');
+        //     const ctx = canvas.getContext('2d');
+        //     canvas.width = imageData.width;
+        //     canvas.height = imageData.height;
+        //     ctx.putImageData(imageData, 0, 0);
+
+        //     const colorMap = new Map();
+        //     const data = imageData.data;
+
+        //     // Identify unique colors
+        //     for (let i = 0; i < data.length; i += 4) {
+        //         const r = data[i];
+        //         const g = data[i + 1];
+        //         const b = data[i + 2];
+        //         const a = data[i + 3];
+
+        //         if (a > 0) {
+        //             const color = `${r},${g},${b}`;
+        //             if (!colorMap.has(color)) {
+        //                 colorMap.set(color, []);
+        //             }
+        //             colorMap.get(color).push(i);
+        //         }
+        //     }
+
+        //     const segmentsContainer = document.getElementById('segmentsContainer');
+        //     segmentsContainer.innerHTML = ''; // Clear previous segments
+
+        //     // Create separate canvases for each color
+        //     colorMap.forEach((indices, color) => {
+        //         const segmentCanvas = document.createElement('canvas');
+        //         segmentCanvas.width = canvas.width;
+        //         segmentCanvas.height = canvas.height;
+        //         const segmentCtx = segmentCanvas.getContext('2d');
+        //         const segmentImageData = segmentCtx.createImageData(canvas.width, canvas.height);
+        //         const segmentData = segmentImageData.data;
+
+        //         indices.forEach(i => {
+        //             segmentData[i] = data[i];
+        //             segmentData[i + 1] = data[i + 1];
+        //             segmentData[i + 2] = data[i + 2];
+        //             segmentData[i + 3] = data[i + 3];
+        //         });
+
+        //         segmentCtx.putImageData(segmentImageData, 0, 0);
+
+        //         const wrapper = document.createElement('div');
+        //         wrapper.className = 'segment-wrapper';
+        //         wrapper.appendChild(segmentCanvas);
+                
+        //         const label = document.createElement('p');
+        //         label.textContent = `RGB(${color})`;
+        //         wrapper.appendChild(label);
+
+        //         segmentsContainer.appendChild(wrapper);
+        //     });
+        // }
+ 
+ 
+ </script>
+</body>
+</html>

@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Optimized Image Processing</title>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.4/dist/tesseract.min.js"></script>
+    <script  src = "effects.js"></script>
+<script src = "removewatermark.js"></script>
+<script src = "objremovelipsync.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/body-pix"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="sidebar">
+        <div class="controls">
+            <input type="file" id="imageUpload" accept="image/*">
+
+            <label for="imageCount">Number of images per effect:</label>
+            <input type="number" id="imageCount" min="1" max="100" value="10">
+            <button id="processButton">Process Image</button>
+            <button id="fastProcessButton">Fast Process</button>
+            <button id="visualizeBtn">Visualize</button>
+
+            <div>
+                <label for="widthInput">Target Width:</label>
+                <input type="number" id="widthInput" min="1" step="1">
+            </div>
+            <div>
+                <label for="heightInput">Target Height:</label>
+                <input type="number" id="heightInput" min="1" step="1">
+            </div>
+            <button id="resizeButton">Resize Image</button>
+            <button id="toggleDraw">Toggle Draw Mode</button>
+            <button id="removeObject">Remove Object</button>
+            <button id="lipSyncButton">Lip Sync Animation</button> <!-- New button -->
+            <button id="generateImages">Generate Images</button> <!-- Brightness button -->
+            <button id="removeWatermarkButton">Remove Watermark</button>
+            <label for="brightness">Max Brightness Change:</label>
+            <input type="range" id="brightness" min="0" max="255" value="100">
+            <input type="number" id="value1" value="0">
+            <input type="number" id="value2" value="0">
+            <input type="number" id="value3" value="0">
+            <input type="number" id="value4" value="0">
+            <input type="number" id="value5" value="0">
+        </div>
+        <div id="masterCheckboxControl">
+            <input type="checkbox" id="masterCheckbox" checked>
+            <label for="masterCheckbox">Select/Unselect All</label>
+        </div>
+        <div id="effectControls"></div>
+    </div>
+    <div id="mainContent">
+        <div id="resultsContainer"></div>
+        <canvas id="imageCanvas"></canvas>
+        <div id="generatedImages"></div>
+        <div id="segmentsContainer"></div>
+        <div id="progress"></div> <!-- Added progress div -->
+        <div id="imageContainer">
+            <div class="image-wrapper">
+                <h3>Original Image</h3>
+                <img id="originalImage" alt="Original Image">
+            </div>
+            <div class="image-wrapper">
+                <h3>Segmented Image</h3>
+                <img id="segmentedImage" alt="Segmented Image">
+            </div>
+        </div>
+    </div>
+    <img id="sourceImage" crossorigin="anonymous" style="display: none;">
+    <div id="mainContainer"></div>
+    <canvas id="visualizationCanvas" width="800" height="600"></canvas>
+      
+    <script src= "main.js"></script>
+    <script src = "imagesegment.js"></script>
+
+    <script>
+        let originalImageData;
+        let maskData; 
+        let size;
+        let objectMask;
+        let lines = [];
+        effects.forEach(effect => {
+            const controlDiv = document.createElement('div');
+            controlDiv.className = 'effect-control';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.id = `${effect}Checkbox`;
+            checkbox.checked = true;
+            checkbox.addEventListener('change', updateMasterCheckbox);
+            const label = document.createElement('label');
+            label.htmlFor = `${effect}Checkbox`;
+            label.textContent = effect;
+            controlDiv.appendChild(checkbox);
+            controlDiv.appendChild(label);
+            effectControls.appendChild(controlDiv);
+        }); 
+
+        imageUpload.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    originalImage = new Image();
+                    originalImage.onload = () => {
+                        imageCanvas.width = originalImage.width;
+                        imageCanvas.height = originalImage.height;
+                        imageCanvas.id = "icid"
+                        ctx.drawImage(originalImage, 0, 0);
+                        originalImageData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height);
+                        maskData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height); // Initialize maskData
+                        size = { w: imageCanvas.width, h: imageCanvas.height }; // Initialize size
+                        objectMask = matrix(imageCanvas.width, imageCanvas.height, false); // Initialize objectMask
+                        console.log('Image loaded and originalImageData set.');
+                    };
+                    originalImage.onerror = (error) => {
+                        console.error('Error loading image:', error);
+                        alert('Failed to load the image. Please try again.');
+                    };
+                    originalImage.src = e.target.result; // Load the image into the canvas
+                };
+                reader.onerror = (error) => {
+                    console.error('Error reading file:', error);
+                    alert('Failed to read the file. Please try again.');
+                };
+                reader.readAsDataURL(file); // Read the file as a data URL
+            }
+        });
+        function loadImage() {
+            originalImage = new Image();
+            originalImage.onload = function() {
+                imageCanvas.width = originalImage.width;
+                imageCanvas.height = originalImage.height;
+                ctx.drawImage(originalImage, 0, 0);
+                originalImageData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height);
+                maskData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height); // Initialize maskData
+                size = { w: imageCanvas.width, h: imageCanvas.height }; // Initialize size
+                objectMask = matrix(imageCanvas.width, imageCanvas.height, false); // Initialize objectMask
+                window.uploadedImageData = originalImageData;
+                imageCanvas.id = "icid1"
+
+                displaySelectedRegionsBorders();
+            }
+            // originalImage.src = 'face.jpg'; // Ensure this path is correct
+        }
+
+        </script>
+</body>
+</html>

@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title></title>
+    <link rel="stylesheet" type="text/css" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/body-pix"></script>
+    <script src="bodyParts.js"></script>
+    <script src="function.js"></script>
+</head>
+<body>
+    <img id="sourceImage" src="5.jpg" crossorigin="anonymous" style="display: none;">
+    <div id="mainContainer"></div>
+    <canvas id="visualizationCanvas" width="800" height="600"></canvas>
+    <input type="number" id="imageCountInput" placeholder="Enter number of images (multiple of 5)" min="5">
+    <button id="visualizeBtn">Visualize</button>
+    <button id="advancedProcessingBtn">Advanced Processing</button>
+    <button id="thirdWorkerBtn">Third Worker Processing</button>    
+<script>
+
+let segmentationResult;
+let processedData = null; 
+let net;
+let imageArray = []; 
+
+async function prepareSegmentation() {
+    const img = document.getElementById('sourceImage');
+    segmentationResult = await net.segmentPersonParts(img);
+}
+
+const worker = new Worker('keypoints-worker.js');
+let collectedPoints = new Map();
+
+async function processImageWithOverlay(processType) {
+    const img = document.getElementById('sourceImage');
+    const mainContainer = document.getElementById('mainContainer');
+    mainContainer.innerHTML = '';
+
+    const imageGrid = document.createElement('div');
+    imageGrid.className = 'image-grid';
+
+    const segmentation = segmentationResult;
+    const bodyPartImages = {};
+    collectedPoints.clear();
+
+    for (let partId = 0; partId < 24; partId++) {
+        const partName = Object.keys(BODY_PARTS)[partId];
+        if (!partName) continue;
+
+        const segmentCanvas = document.createElement('canvas');
+        segmentCanvas.width = img.width;
+        segmentCanvas.height = img.height;
+        const segmentCtx = segmentCanvas.getContext('2d');
+        segmentCtx.drawImage(img, 0, 0);
+
+        const imageData = segmentCtx.getImageData(0, 0, img.width, img.height);
+        for (let i = 0; i < segmentation.data.length; i++) {
+            if (segmentation.data[i] !== partId) imageData.data[i * 4 + 3] = 0;
+        }
+
+        const variations = await processSegmentVariations(imageData, partName);
+        bodyPartImages[partName] = variations.map(v => ({
+            imageData: v.data,
+            width: img.width,
+            height: img.height,
+            extremePoints: v.extremePoints
+        }));
+    }
+
+    const pointsToProcess = {
+        leftFace: collectedPoints.get('left_face'),
+        rightFace: collectedPoints.get('right_face'),
+        leftUpperArmFront: collectedPoints.get('left_upper_arm_front'),
+        leftUpperArmBack: collectedPoints.get('left_upper_arm_back'),
+        leftLowerArmFront: collectedPoints.get('left_lower_arm_front'),
+        leftLowerArmBack: collectedPoints.get('left_lower_arm_back'),
+        leftHand: collectedPoints.get('left_hand'),
+        rightUpperArmFront: collectedPoints.get('right_upper_arm_front'),
+        rightUpperArmBack: collectedPoints.get('right_upper_arm_back'),
+        rightLowerArmFront: collectedPoints.get('right_lower_arm_front'),
+        rightLowerArmBack: collectedPoints.get('right_lower_arm_back'),
+        rightHand: collectedPoints.get('right_hand'),
+        torsoFront: collectedPoints.get('torso_front'),
+        torsoBack: collectedPoints.get('torso_back'),
+        leftUpperLegFront: collectedPoints.get('left_upper_leg_front'),
+        leftUpperLegBack: collectedPoints.get('left_upper_leg_back'),
+        leftLowerLegFront: collectedPoints.get('left_lower_leg_front'),
+        leftLowerLegBack: collectedPoints.get('left_lower_leg_back'),
+        rightUpperLegFront: collectedPoints.get('right_upper_leg_front'),
+        rightUpperLegBack: collectedPoints.get('right_upper_leg_back'),
+        rightLowerLegFront: collectedPoints.get('right_lower_leg_front'),
+        rightLowerLegBack: collectedPoints.get('right_lower_leg_back'),
+        leftFoot: collectedPoints.get('left_foot'),
+        rightFoot: collectedPoints.get('right_foot')
+    };
+
+    console.log('imageArray :>> ', imageArray);    
+
+    worker.postMessage({
+        type: 'calculateAverage',
+        points: pointsToProcess,
+        bodyPartImages,
+        partNames: {
+            leftUpperArmFront: 'left_upper_arm_front',
+            leftUpperArmBack: 'left_upper_arm_back',
+            leftLowerArmFront: 'left_lower_arm_front',
+            leftLowerArmBack: 'left_lower_arm_back',
+            leftHand: 'left_hand',
+            rightUpperArmFront: 'right_upper_arm_front',
+            rightUpperArmBack: 'right_upper_arm_back',
+            rightLowerArmFront: 'right_lower_arm_front',
+            rightLowerArmBack: 'right_lower_arm_back',
+            rightHand: 'right_hand',
+            leftFoot: 'left_foot',
+            rightFoot: 'right_foot',
+            leftUpperFoot: 'left_upper_foot',
+            leftLowerFoot: 'left_lower_foot',
+            rightUpperFoot: 'right_upper_foot',
+            rightLowerFoot: 'right_lower_foot',
+            leftUpperLegFront: 'left_upper_leg_front',
+            leftUpperLegBack: 'left_upper_leg_back',
+            leftLowerLegFront: 'left_lower_leg_front',
+            leftLowerLegBack: 'left_lower_leg_back',
+            rightUpperLegFront: 'right_upper_leg_front',
+            rightUpperLegBack: 'right_upper_leg_back',
+            rightLowerLegFront: 'right_lower_leg_front',
+            rightLowerLegBack: 'right_lower_leg_back'
+        },
+        offset: { x: 100, y: 50 },
+        imageArray
+    }); 
+
+    worker.onmessage = e => {
+        const { type, averages, extremePoints, partNames } = e.data;
+        if (type === 'combinedResults' && (averages || extremePoints)) {
+            processedData = {
+                averages,
+                extremePoints,
+                partNames,
+                timestamp: Date.now()
+            };
+            
+            let postprocessingWorker; // Declare postprocessingWorker here
+
+            if (processType === 'visualize') {
+                postprocessingWorker = new Worker('post-processing-workerold.js');
+            } else if (processType === 'advanced') {
+                postprocessingWorker = new Worker('advanced-processing-worker.js');
+            } else if (processType === 'thirdWorker') {
+                postprocessingWorker = new Worker('third-worker.js');
+            }
+
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+         
+            const wrapper = document.createElement('div');
+            wrapper.className = 'image-wrapper';
+            wrapper.appendChild(canvas);
+            wrapper.appendChild(document.createElement('div')).className = 'keypoints-label';
+            mainContainer.appendChild(wrapper);
+
+            const workerMessage = {
+                type: e.data.type,
+                imageData: ctx.getImageData(0, 0, canvas.width, canvas.height),
+                width: canvas.width,
+                height: canvas.height,
+                extremePoints,
+                averages,
+                timestamp: Date.now(),
+                partNames,
+                bodyPartImages,
+                rotationAngles: [0, 45, 90, 135, 180],
+                imageArray
+
+            };
+
+            postprocessingWorker.postMessage(workerMessage);
+
+            postprocessingWorker.onmessage = e => {
+                if (e.data.type === 'processedVariations') {
+                    const setsOfFive = [];
+                    for (let i = 0; i < e.data.variations.length; i += 5) {
+                        setsOfFive.push(e.data.variations.slice(i, i + 5));
+                    }
+
+                    setsOfFive.forEach((set, index) => {
+                        const container = document.createElement('div');
+                        container.id = `variations-container-${index}`;
+                        container.style.marginBottom = '40px';
+                        document.body.appendChild(container);
+                        visualizeVariations(set, container);
+                    });
+                }
+            };
+
+            postprocessingWorker.onerror = error => console.error('Post-processing worker error:', error);
+        }
+    };
+}
+
+function startProcessing(processType) {
+    if (!segmentationResult) {
+        alert('Segmentation not ready. Please wait.');
+        return;
+    }
+    const count = parseInt(document.getElementById('imageCountInput').value, 10) || 1;
+    if (isNaN(count) || count < 1) {
+        alert('Please enter a valid number (multiple of 5).');
+        return;
+    }
+    
+    // Clear imageArray before starting new processing
+    imageArray = [];
+    if (!window.imageArrayCollection) {
+        window.imageArrayCollection = [];
+    }
+
+    for (let i = 0; i < count; i++) {
+        console.log(i);
+        processImageWithOverlay(processType);
+    }
+
+    // Capture the source image data and add it to the imageArray
+    const gifImage = document.getElementById('sourceImage');
+    const canvas = document.createElement('canvas');
+    canvas.width = gifImage.width;
+    canvas.height = gifImage.height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(gifImage, 0, 0);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const sourceImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    
+    // Create a new array for this processing instance
+    const currentProcessImageArray = [sourceImageData.data];
+
+    // Add the image data to imageArray if not already added
+    if (!imageArray.some(arr => arr.length === imageData.data.length && 
+                               arr.every((val, index) => val === imageData.data[index]))) {
+    }
+    
+    console.log('Final imageArray :>> ', imageArray);
+}
+
+
+
+document.getElementById('advancedProcessingBtn').addEventListener('click', () => {
+    startProcessing('advanced');
+});
+
+document.getElementById('thirdWorkerBtn').addEventListener('click', () => {
+    startProcessing('thirdWorker');
+});
+
+async function loadModels() {
+    net = await bodyPix.load({
+        architecture: 'MobileNetV1',
+        outputStride: 16,
+        multiplier: 0.75,
+        quantBytes: 2
+    });
+}
+
+document.getElementById('visualizeBtn').addEventListener('click', () => {
+    startProcessing('visualize');
+});
+
+document.getElementById('sourceImage').onload = async () => {
+    await loadModels();
+    await prepareSegmentation(); // Automatically prepare segmentation
+};
+
+function visualizeVariations(variations, container) {
+    container.innerHTML = '';
+
+    variations.forEach((variation, index) => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'variation-wrapper';
+
+        const canvas = document.createElement('canvas');
+        canvas.width = variation.width;
+        canvas.height = variation.height;
+
+        canvas.style.height = "100px";
+        canvas.style.width = "100px";
+
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.putImageData(new ImageData(variation.imageData, variation.width, variation.height), 0, 0);
+
+        const label = document.createElement('div');
+
+        wrapper.appendChild(canvas);
+        wrapper.appendChild(label);
+        container.appendChild(wrapper);
+
+        // Hide all canvases initially
+        canvas.style.display = 'none';
+
+        // Store the canvas in an array
+        variation.canvas = canvas;
+        imageArray.push(variation.imageData);
+        console.log('imageArray :>> ', imageArray);
+    });
+
+    // Function to animate the frames
+    function animateFrames() {
+        let currentIndex = 0;
+
+        function showNextFrame() {
+            // Hide all canvases
+            variations.forEach(variation => {
+                variation.canvas.style.display = 'none';
+            });
+
+            // Show the current canvas
+            variations[currentIndex].canvas.style.display = 'block';
+
+            // Increment the index
+            currentIndex = (currentIndex + 1) % variations.length;
+
+            // Set timeout for the next frame
+            setTimeout(showNextFrame, 500);
+        }
+
+        // Start the animation
+        showNextFrame();
+    }
+
+    // Start the animation
+    animateFrames();
+}
+
+</script>
+</body>
+</html>

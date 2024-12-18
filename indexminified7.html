@@ -1,0 +1,1397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Optimized Image Processing</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.worker.js"></script>
+    <style>
+        #imageContainer {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 20px;
+        }
+        .image-wrapper {
+            text-align: center;
+        }
+        .image-wrapper img {
+            max-width: 100%;
+            height: auto;
+        }
+    </style>
+</head> 
+<body>  
+    <div id="sidebar">
+        <div class="controls">
+            <input type="file" id="imageUpload" accept="image/*">
+            <label for="imageCount">Number of images per effect:</label>
+            <input type="number" id="imageCount" min="1" max="100" value="10">
+            <button id="processButton">Process Image</button>
+            <button id="fastProcessButton">Fast Process</button>
+            <button id="createGifButton">Create GIF</button>
+            <button id="mergeEffectsButton">Merge Effects</button>
+            <button id="mergeTwoEffectsButton">Merge Two Effects</button>
+            <button id="mergeThreeEffectsButton">Merge Three Effects</button>
+            <button id="segmentationButton">Segment Image</button>
+            <button id="fastProcessSegmentButton">Fast Process Segment</button>
+            <button id="fastProcessBtn">Fast Process Segmented Image</button>
+            <button id="processMagicWandSelection">Process Magic Wand Selection</button>
+            <input type="number" id="value1" value="0">
+            <input type="number" id="value2" value="0">
+            <input type="number" id="value3" value="0">
+            <input type="number" id="value4" value="0">
+            <input type="number" id="value5" value="0">
+        </div>
+        <div id="processedImagesContainer"></div>
+        <div id="masterCheckboxControl">
+            <input type="checkbox" id="masterCheckbox" checked>
+            <label for="masterCheckbox">Select/Unselect All</label>
+        </div>
+        <div id="effectControls"></div>
+    </div>  
+    <div id="generatedImages"></div>
+    <div id="drawingControls">
+        <div id="controlsContainer"></div>
+        <div id="existingContainerId"></div>
+        <label><input type="radio" name="drawMode" value="magicWand" checked>Magic Wand</label>
+        <label><input type="radio" name="drawMode" value="point">Add Points</label>
+        <label><input type="radio" name="drawMode" value="line">Add Lines</label>
+        <button id="clearSelection">Clear Selection</button>
+        <button id="confirmSelection">Confirm Selection</button>
+        <label><input type="checkbox" id="debugMode">Debug Mode</label>
+        <button id="addMagicWand">Add</button>
+        <button id="subtractMagicWand">Subtract</button>
+        <button id="invertMagicWand">Invert</button>
+        <label for="tolerance">Tolerance:</label>
+        <input type="range" id="tolerance" min="0" max="255" value="32">
+        <label for="imageCount">Image Count:</label>
+        <input type="number" id="imageCount" min="1" value="5">
+        <label for="brightness">Max Brightness Change:</label>
+        <input type="range" id="brightness" min="0" max="255" value="100">
+        <button id="generateImages">Generate Images</button>
+        <button id="generateGIF">Generate GIF</button>
+        <input type="number" id="value1" value="0">
+        <input type="number" id="value2" value="0">
+        <input type="number" id="value3" value="0">
+        <input type="number" id="value4" value="0">
+        <input type="number" id="value5" value="0">
+    </div>  
+    <div id="mainContent">
+        <canvas id="imageCanvas"></canvas>
+        <div id="imageContainer">
+            <div class="image-wrapper">
+                <h3>Original Image</h3>
+                <img id="originalImage" alt="Original Image">
+            </div>
+            <div class="image-wrapper">
+                <h3>Segmented Image</h3>
+                <img id="segmentedImage" alt="Segmented Image">
+            </div>
+        </div>
+        <div id="resultsContainer"></div>
+    </div>  
+    <script>
+        let processedFrames = [];
+        let clickedPoints = [];
+        let lines = [];
+        let currentLine = null;
+        let drawMode = 'point';
+        let segmentedImages = [];
+        let originalImageData;
+        const imageUpload = document.getElementById('imageUpload');
+        const resultsContainer = document.getElementById('resultsContainer');
+        const effectControls = document.getElementById('effectControls');
+        const imageCountInput = document.getElementById('imageCount');
+        const processButton = document.getElementById('processButton');
+        const masterCheckbox = document.getElementById('masterCheckbox');
+        const fastProcessButton = document.getElementById('fastProcessButton');
+
+        document.getElementById('createGifButton').addEventListener('click', () => {    
+            const resultsContainer = document.getElementById('resultsContainer');
+            resultsContainer.innerHTML = '<p>Creating animations... Please wait.</p>';
+            
+            const processedEffects = Object.keys(processedImages);
+            
+            if (processedEffects.length > 0) {
+                resultsContainer.innerHTML = '';
+                processedEffects.forEach(effect => {
+                    if (processedImages[effect].length > 0) {
+                        createCanvasAnimation(effect, processedImages[effect]);
+          
+                    } else {
+                        
+                    }
+                });
+            } else {
+                resultsContainer.innerHTML = '<p>Please process images first before creating animations.</p>';
+            }
+        });
+
+        document.getElementById('imageUpload').addEventListener('change', loadImage);
+        document.getElementById('addMagicWand').addEventListener('click', () => magicWandMode = 'add');
+        document.getElementById('subtractMagicWand').addEventListener('click', () => magicWandMode = 'subtract');
+        document.getElementById('invertMagicWand').addEventListener('click', () => magicWandMode = 'invert');
+        document.getElementById('tolerance').addEventListener('input', (e) => tolerance = parseInt(e.target.value));
+        document.getElementById('generateImages').addEventListener('click', generateBrightnessVariations);
+
+// Add this function to handle clicks and store points
+function handleCanvasClick(event) {
+    alert("clicked")
+
+    const rect = imageCanvas.getBoundingClientRect();
+    const x = Math.floor((event.clientX - rect.left) / (rect.width / imageCanvas.width));
+    const y = Math.floor((event.clientY - rect.top) / (rect.height / imageCanvas.height));
+    clickedPoints.push({x, y});
+    performMagicWandSelection(x, y);
+}
+
+// Modify the generateBrightnessVariations function
+function generateBrightnessVariations() {
+    const imageCount = parseInt(document.getElementById('imageCount').value);
+    const maxBrightness = parseInt(document.getElementById('brightness').value);
+    const imageData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height);
+    
+    const value1 = parseInt(document.getElementById('value1').value);
+    const value2 = parseInt(document.getElementById('value2').value);
+    const value3 = parseInt(document.getElementById('value3').value);
+    const value4 = parseInt(document.getElementById('value4').value);
+    const value5 = parseInt(document.getElementById('value5').value);
+
+    const worker = new Worker('js/brightness1Worker.js');
+    worker.postMessage({
+        imageData: imageData,
+        selectedRegions: selectedRegions,
+        imageCount: imageCount,
+        maxBrightness: maxBrightness,
+        value1: value1,
+        value2: value2,
+        value3: value3,
+        value4: value4,
+        value5: value5,
+        clickedPoints: clickedPoints,
+        lines: lines
+    });
+
+    worker.onmessage = function(e) {
+        displaySegmentedImages(e.data.segmentedImages);
+    };
+}
+
+// Function to add lines (you'll need to call this when appropriate)
+        function addLine(x1, y1, x2, y2) {
+            lines.push({x1, y1, x2, y2});
+        }
+
+        document.getElementById('processMagicWandSelection').addEventListener('click', processMagicWandSelection);
+        function processSegmentWithEffect(segmentCanvas, effect, value) {
+            return new Promise((resolve, reject) => {
+            const worker = new Worker(`js/${effect}Worker.js`);
+
+            worker.onmessage = function(e) {
+                if (e.data.error) {
+                    reject(new Error(`Error in ${effect} worker: ${e.data.error}`));
+                } else {
+                    const resultCanvas = document.createElement('canvas');
+                    resultCanvas.width = segmentCanvas.width;
+                    resultCanvas.height = segmentCanvas.height;
+                    const ctx = resultCanvas.getContext('2d');
+                    ctx.putImageData(e.data.imageData, 0, 0);
+                    resolve(resultCanvas);
+                }
+            };
+
+            worker.onerror = function(error) {
+                reject(new Error(`Error in ${effect} worker: ${error.message}`));
+            };
+
+            const imageData = segmentCanvas.getContext('2d').getImageData(0, 0, segmentCanvas.width, segmentCanvas.height);
+            worker.postMessage({ 
+                imageData: imageData, 
+                value: value,
+                clickedPoints: clickedPoints,
+                lines: lines,
+                debugMode: document.getElementById('debugMode').checked
+            });
+    });
+}
+
+
+function createAndDisplayGif(frames, title) {
+    const container = document.createElement('div');
+    container.className = 'gif-container';
+    
+    const titleElement = document.createElement('h3');
+    titleElement.textContent = title;
+    container.appendChild(titleElement);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = frames[0].width;
+    canvas.height = frames[0].height;
+    const ctx = canvas.getContext('2d');
+    container.appendChild(canvas);
+
+    resultsContainer.appendChild(container);
+
+    let frameIndex = 0;
+    const frameDelay = 200; // 200ms delay between frames
+
+    function animateFrames() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(frames[frameIndex], 0, 0);
+        frameIndex = (frameIndex + 1) % frames.length;
+        setTimeout(animateFrames, frameDelay);
+    }
+
+    // Start the animation
+    animateFrames();
+
+    // Optional: Add play/pause functionality
+    let isPlaying = true;
+    canvas.addEventListener('click', () => {
+        isPlaying = !isPlaying;
+        if (isPlaying) {
+            animateFrames();
+        }
+    });
+}
+
+
+function displayProcessedFrames(frames, title) {
+    const container = document.createElement('div');
+    container.className = 'processed-frames';
+    const titleElement = document.createElement('h3');
+    titleElement.textContent = title;
+    container.appendChild(titleElement);
+
+    frames.forEach((frame, index) => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'frame-wrapper';
+        const img = document.createElement('img');
+        img.src = frame.toDataURL();
+        img.alt = `Frame ${index + 1}`;
+        wrapper.appendChild(img);
+        container.appendChild(wrapper);
+    });
+
+    resultsContainer.appendChild(container);
+}
+
+
+function createSegmentCanvasFromRegion(region) {
+    const bounds = getBoundingBox(region, imageCanvas.width, imageCanvas.height);
+
+    const segmentCanvas = document.createElement('canvas');
+    segmentCanvas.width = bounds.width;
+    segmentCanvas.height = bounds.height;
+    const segmentCtx = segmentCanvas.getContext('2d');
+
+    const maskCanvas = document.createElement('canvas');
+    maskCanvas.width = bounds.width;
+    maskCanvas.height = bounds.height;
+    const maskCtx = maskCanvas.getContext('2d');
+
+    const originalImageData = ctx.getImageData(bounds.left, bounds.top, bounds.width, bounds.height);
+    const segmentImageData = segmentCtx.createImageData(bounds.width, bounds.height);
+    const maskImageData = maskCtx.createImageData(bounds.width, bounds.height);
+
+    for (let y = 0; y < bounds.height; y++) {
+        for (let x = 0; x < bounds.width; x++) {
+            const i = (y * bounds.width + x) * 4;
+            const pixelIndex = (y + bounds.top) * imageCanvas.width + (x + bounds.left);
+            
+            if (region.includes(pixelIndex)) {
+                segmentImageData.data[i] = originalImageData.data[i];
+                segmentImageData.data[i + 1] = originalImageData.data[i + 1];
+                segmentImageData.data[i + 2] = originalImageData.data[i + 2];
+                segmentImageData.data[i + 3] = originalImageData.data[i + 3];
+
+                maskImageData.data[i] = maskImageData.data[i + 1] = maskImageData.data[i + 2] = 255;
+                maskImageData.data[i + 3] = 255;
+            } else {
+                segmentImageData.data[i + 3] = 0;
+            }
+        }
+    }
+
+    segmentCtx.putImageData(segmentImageData, 0, 0);
+    maskCtx.putImageData(maskImageData, 0, 0);
+
+    return { segmentCanvas, maskCanvas };
+}
+
+function createCanvasAnimation(effect, processedImages) {
+    const canvas = document.createElement('canvas');
+    canvas.width = processedImages[0].canvas.width;
+    canvas.height = processedImages[0].canvas.height;
+    const ctx = canvas.getContext('2d');
+    let frameIndex = 0;
+    function animate() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        ctx.drawImage(originalImage, 0, 0);
+        
+        // Apply the processed effect on top with some transparency
+        ctx.globalAlpha = 0.7; // Adjust this value to change the effect intensity
+        ctx.drawImage(processedImages[frameIndex].canvas, 0, 0);
+        ctx.globalAlpha = 1.0; // Reset global alpha
+        
+        frameIndex = (frameIndex + 1) % processedImages.length;
+        
+        requestAnimationFrame(animate);
+    }
+    
+    // Start the animation
+    animate();
+    
+    // Add the canvas to the DOM
+    const container = document.createElement('div');
+    container.appendChild(canvas);
+    document.getElementById('resultsContainer').appendChild(container);
+}
+
+async function fastProcessSegments() {
+    const imageCount = parseInt(imageCountInput.value);
+    console.log('imageCount :>> ', imageCount);
+    const selectedEffects = getSelectedEffects();
+    console.log('segmentedImages :>> ', segmentedImages);
+    console.log('selectedRegions :>> ', selectedRegions);
+    if (selectedRegions.length === 0) {
+        console.log('No regions selected. Please use the magic wand tool to select regions.');
+        return;
+    }
+
+    const combinedSegments = [...segmentedImages];
+    console.log('combinedSegments :>> ', combinedSegments);
+    if (selectedRegions.length > 0) {
+        selectedRegions.forEach((region, index) => {
+            const segmentCanvas = document.createElement('canvas');
+            segmentCanvas.width = originalImageData.width;
+            segmentCanvas.height = originalImageData.height;
+            const segmentCtx = segmentCanvas.getContext('2d');
+            const maskCanvas = document.createElement('canvas');
+            maskCanvas.width = originalImageData.width;
+            maskCanvas.height = originalImageData.height;
+            const maskCtx = maskCanvas.getContext('2d');
+            // Create segment and mask
+            segmentCtx.putImageData(originalImageData, 0, 0);
+            const segmentImageData = segmentCtx.getImageData(0, 0, segmentCanvas.width, segmentCanvas.height);
+            const maskImageData = maskCtx.createImageData(maskCanvas.width, maskCanvas.height);
+            console.log('maskImageData :>> ', maskImageData);
+            for (let i = 0; i < region.length; i++) {
+                const pixelIndex = region[i];
+                const x = pixelIndex % originalImageData.width;
+                const y = Math.floor(pixelIndex / originalImageData.width);
+                const index = (y * originalImageData.width + x) * 4;
+                // Set mask to white for selected area
+                maskImageData.data[index] = maskImageData.data[index + 1] = maskImageData.data[index + 2] = 255;
+                maskImageData.data[index + 3] = 255;
+            }
+            segmentCtx.putImageData(segmentImageData, 0, 0);
+            maskCtx.putImageData(maskImageData, 0, 0);
+            combinedSegments.push({
+                canvas: segmentCanvas,
+                mask: maskCanvas
+            });
+        });
+    }
+
+    for (let segmentIndex = 0; segmentIndex < combinedSegments.length; segmentIndex++) {
+        const { canvas: segmentCanvas, mask: segmentMask } = combinedSegments[segmentIndex];
+        // for (let i = 0; i < region.length; i++) {
+        //     const pixelIndex = region[i];
+        //     const x = pixelIndex % originalImageData.width;
+        //     const y = Math.floor(pixelIndex / originalImageData.width);
+        //     const index = (y * originalImageData.width + x) * 4;
+
+        //     // Copy only the selected pixels to the segment
+        //     for (let j = 0; j < 4; j++) {
+        //         segmentImageData.data[index + j] = originalImageData.data[index + j];
+        //     }
+        // }
+        for (const effect of selectedEffects) {
+            const processedFrames = [];
+            for (let i = 0; i < imageCount; i++) {
+                const canvas = document.createElement('canvas');
+                canvas.width = originalImageData.width;
+                canvas.height = originalImageData.height;
+                const ctx = canvas.getContext('2d');
+
+                // Draw the original image
+                ctx.putImageData(originalImageData, 0, 0);
+
+                // Apply effect to the segment
+                const segmentImageData = segmentCanvas.getContext('2d').getImageData(0, 0, segmentCanvas.width, segmentCanvas.height);
+                let value = getEffectValue(effect, i, imageCount);
+                try {
+                    const processedSegmentData = await applyEffect(effect, segmentImageData, value, clickedPoints, lines);
+                    console.log('processedSegmentData :>> ', processedSegmentData);
+                    // Draw the processed segment back onto the canvas
+                    const tempCanvas = document.createElement('canvas');
+                    tempCanvas.width = segmentCanvas.width;
+                    tempCanvas.height = segmentCanvas.height;
+                    tempCanvas.getContext('2d').putImageData(processedSegmentData, 0, 0);
+
+                    // Use the mask to composite the processed segment over the original image
+                    ctx.globalCompositeOperation = 'destination-out';
+                    ctx.drawImage(segmentMask, 0, 0);
+                    ctx.globalCompositeOperation = 'source-over';
+                    ctx.drawImage(tempCanvas, 0, 0);
+
+                    // Fill in any white pixels
+                    const finalImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    fillWhitePixels(finalImageData);
+                    ctx.putImageData(finalImageData, 0, 0);
+
+                    processedFrames.push(canvas);
+                } catch (error) {
+                    console.error(`Error processing effect ${effect} for segment ${segmentIndex}, image ${i+1}:`, error.message);
+                }
+            }
+            displayAnimatedSegment(processedFrames, `Segment ${segmentIndex + 1} - ${effect}`);
+        }
+    }
+}
+
+function fillCutOutArea(ctx, mask) {
+    const width = ctx.canvas.width;
+    const height = ctx.canvas.height;
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const maskData = mask.getContext('2d').getImageData(0, 0, width, height).data;
+
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const index = (y * width + x) * 4;
+            if (maskData[index] === 255) { // If this pixel is in the mask
+                const color = getAverageColor(imageData.data, x, y, width, height);
+                imageData.data[index] = color.r;
+                imageData.data[index + 1] = color.g;
+                imageData.data[index + 2] = color.b;
+                imageData.data[index + 3] = 255; // Full opacity
+            }
+        }
+    }
+
+    ctx.putImageData(imageData, 0, 0);
+}
+
+function getAverageColor(data, x, y, width, height) {
+    const neighbors = [];
+    for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                const index = (ny * width + nx) * 4;
+                if (data[index + 3] > 0) {  // If the pixel is not fully transparent
+                    neighbors.push({
+                        r: data[index],
+                        g: data[index + 1],
+                        b: data[index + 2]
+                    });
+                }
+            }
+        }
+    }
+
+    if (neighbors.length === 0) {
+        return { r: 0, g: 0, b: 0 };  // Return black if no valid neighbors
+    }
+
+    const sum = neighbors.reduce((acc, color) => ({
+        r: acc.r + color.r,
+        g: acc.g + color.g,
+        b: acc.b + color.b
+    }), { r: 0, g: 0, b: 0 });
+
+    return {
+        r: Math.round(sum.r / neighbors.length),
+        g: Math.round(sum.g / neighbors.length),
+        b: Math.round(sum.b / neighbors.length)
+    };
+}
+
+function fillWhitePixels(imageData) {
+
+    const width = imageData.width;
+    const height = imageData.height;
+    const data = imageData.data;
+
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const index = (y * width + x) * 4;
+            if (data[index] === 255 && data[index + 1] === 255 && data[index + 2] === 255 && data[index + 3] === 255) {
+                const color = getAverageColor(data, x, y, width, height);
+                data[index] = color.r;
+                data[index + 1] = color.g;
+                data[index + 2] = color.b;
+            }
+        }
+    }
+}
+
+document.getElementById('fastProcessBtn').addEventListener('click', () => {
+    // alert("button")
+    fastProcessSegments();
+    generateBrightnessVariations();
+});
+
+document.getElementById('fastProcessSegmentButton').addEventListener('click', fastProcessSegments);
+
+function displayAnimatedSegment(frames, title) {
+    const container = document.createElement('div');
+    container.className = 'animated-segment';
+    const titleElement = document.createElement('h3');
+    titleElement.textContent = title;
+    container.appendChild(titleElement);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = frames[0].width;
+    canvas.height = frames[0].height;
+    const ctx = canvas.getContext('2d');
+    container.appendChild(canvas);
+
+    let frameIndex = 0;
+    function animate() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(frames[frameIndex], 0, 0);
+        frameIndex = (frameIndex + 1) % frames.length;
+        requestAnimationFrame(animate);
+    }
+    animate();
+
+    resultsContainer.appendChild(container);
+}
+
+
+function processImageWithMethod(processingMethod) {
+    if (originalImageData) {
+        processingMethod(originalImageData);
+    } else {
+        alert('Please select an image first.');
+    }
+}
+
+    const imageCanvas = document.getElementById('imageCanvas');
+const ctx = imageCanvas.getContext('2d');
+    document.getElementById('segmentationButton').addEventListener('click', handleSegmentation);
+  
+  
+        const effects = [
+            // 'brightness', 'hue',
+            //  'saturation', 'vintage', 'ink', 'vibrance', 'denoise', 'hexagonalPixelate', 'invert', 'bulgePinch', 'swirl', 'lensBlur', 'tiltShiftBlur', 'triangularBlur', 'zoomBlur', 'edgeWork', 'dotScreen', 'colorHalftone',
+             'perspectiveTilt',
+              'perspectiveSqueeze', 'perspectiveCurve', 'perspectiveTwist', 
+            //  'perspectiveFisheye', 'perspective', 'perspectiveRotate', 'perspectiveSkew',
+            //  'perspectiveWarp', 'perspectiveZoom', 'perspectiveTunnel', 'perspectiveSphere', 
+            //  'perspectiveCylinder', 'perspectiveRipple', 'perspectiveVortex', 'perspectiveFold',
+            //  'perspectivePixelate', 'perspectiveEmboss', 'perspectiveMosaic',
+            //  'perspectiveOilPainting', 'perspectivePosterize',
+            //  'kaleidoscope',
+            // 'segmentation16',
+            ];
+           
+        const workers = {};
+  
+  
+        effects.forEach(effect => { workers[effect] = new Worker(`js/${effect}Worker.js`); });
+
+        let processedImages = {};
+        processButton.addEventListener('click', () => processImageWithMethod(processImage));
+        fastProcessButton.addEventListener('click', () => processImageWithMethod(fastProcessImage));
+// masterCheckbox.addEventListener('change', toggleAllEffects);
+        const animationControlDiv = document.createElement('div');
+        animationControlDiv.className = 'effect-control';
+        const animationCheckbox = document.createElement('input');
+
+    animationCheckbox.type = 'checkbox';
+    animationCheckbox.id = 'animationCheckbox';
+    // animationCheckbox.addEventListener('change', toggleAnimationEffects);
+    const animationLabel = document.createElement('label');
+    animationLabel.htmlFor = 'animationCheckbox';
+    animationLabel.textContent = 'Animation';
+    animationControlDiv.appendChild(animationCheckbox);
+    animationControlDiv.appendChild(animationLabel);
+    effectControls.appendChild(animationControlDiv);
+
+    effects.forEach(effect => {
+        const controlDiv = document.createElement('div');
+        controlDiv.className = 'effect-control';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.id = `${effect}Checkbox`;
+        checkbox.checked = true;
+        // checkbox.addEventListener('change', updateMasterCheckbox);
+        const label = document.createElement('label');
+        label.htmlFor = `${effect}Checkbox`;
+        label.textContent = effect;
+        controlDiv.appendChild(checkbox);
+        controlDiv.appendChild(label);
+        effectControls.appendChild(controlDiv);
+    });
+
+    const workers1 = {
+        segmentation181: new Worker('js/segmentation181Worker.js')
+    };
+
+function getSegmentedImageData(index) {
+    const canvasId = `segmentcanvasid${index}`;
+    const canvas = document.getElementById(canvasId);
+    if (canvas) {
+        const ctx = canvas.getContext('2d');
+        return ctx.getImageData(0, 0, canvas.width, canvas.height);
+    } else {
+        console.error(`Canvas with id '${canvasId}' not found`);
+        return null;
+    }
+}
+
+    function getSelectedEffects() {
+    return effects.filter(effect => {
+        const checkbox = document.getElementById(`${effect}Checkbox`);
+        return checkbox && checkbox.checked;
+    });
+}
+
+let originalImage;
+
+imageUpload.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) {
+        originalImage = new Image();
+        originalImage.onload = function() {
+            displayUploadedImage(this);
+            // handleSegmentation();
+            
+            // Set originalImageData here
+            const canvas = document.createElement('canvas');
+            canvas.width = originalImage.width;
+            canvas.height = originalImage.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(originalImage, 0, 0);
+            originalImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        }
+        originalImage.src = URL.createObjectURL(file);
+    }
+});
+
+function displayUploadedImage(img) {
+    uploadedImage = img;
+    // console.log(img);
+    imageCanvas.width = img.width;
+    imageCanvas.height = img.height;
+    ctx.drawImage(img, 0, 0);
+    animationPoints = [];
+    // drawAnimationPoints();
+}
+  
+
+
+
+function handleSegmentation() {
+    const file = imageUpload.files[0];
+    if (!file) {
+        alert('Please upload an image first.');
+        return;
+    }
+
+    const img = new Image();
+    img.onload = function() {
+        document.getElementById('originalImage').src = img.src;
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
+        originalImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+        workers1['segmentation181'].postMessage({
+            imageData: originalImageData,
+            value: 30,
+            debugMode: document.getElementById('debugMode').checked
+        });
+
+        workers1['segmentation181'].onmessage = function(e) {
+            if (e.data.imageData) {
+                displaySegmentedImage(e.data.imageData);
+                separateAndDisplayColorSegments(e.data.imageData, originalImageData);
+            }
+        };
+    };
+    img.src = URL.createObjectURL(file);
+}
+
+
+
+function separateAndDisplayColorSegments(segmentedImageData, originalImageData) {
+    segmentedImages = []; // Reset the array
+    const colorMap = new Map();
+    const segmentedData = segmentedImageData.data;
+    const originalData = originalImageData.data;
+    const width = segmentedImageData.width;
+    const height = segmentedImageData.height;
+
+    for (let i = 0; i < segmentedData.length; i += 4) {
+        const r = segmentedData[i];
+        const g = segmentedData[i + 1];
+        const b = segmentedData[i + 2];
+        const a = segmentedData[i + 3];
+        if (a > 0) {
+            const color = `${r},${g},${b}`;
+            if (!colorMap.has(color)) {
+                colorMap.set(color, []);
+            }
+            colorMap.get(color).push(i);
+        }
+    }
+
+    const segmentsContainer = document.createElement('div');
+    segmentsContainer.id = 'segmentsContainer';
+    segmentsContainer.className = 'segments-container';
+    resultsContainer.appendChild(segmentsContainer);
+
+    let index = 0;
+    colorMap.forEach((indices, color) => {
+        const segmentArea = calculateSegmentArea(indices, width);
+        if (segmentArea > 0.0029 && segmentArea < 0.4) {
+            const segmentCanvas = document.createElement('canvas');
+            segmentCanvas.width = width;
+            segmentCanvas.height = height;
+            const segmentCtx = segmentCanvas.getContext('2d');
+
+            const maskCanvas = document.createElement('canvas');
+            maskCanvas.width = width;
+            maskCanvas.height = height;
+            const maskCtx = maskCanvas.getContext('2d');
+
+            const segmentImageData = segmentCtx.createImageData(width, height);
+            const maskImageData = maskCtx.createImageData(width, height);
+
+            indices.forEach(i => {
+                for (let j = 0; j < 4; j++) {
+                    segmentImageData.data[i + j] = originalData[i + j];
+                    maskImageData.data[i + j] = 255; // White for the mask
+                }
+            });
+
+            segmentCtx.putImageData(segmentImageData, 0, 0);
+            maskCtx.putImageData(maskImageData, 0, 0);
+
+            segmentedImages.push({
+                canvas: segmentCanvas,
+                mask: maskCanvas
+            });
+
+            const wrapper = document.createElement('div');
+            wrapper.className = 'segment-wrapper';
+            wrapper.appendChild(segmentCanvas);
+            const label = document.createElement('p');
+            label.textContent = `Segment ${index + 1} (${(segmentArea * 100).toFixed(2)}%)`;
+            wrapper.appendChild(label);
+            segmentsContainer.appendChild(wrapper);
+            index++;
+        }
+    });
+}
+
+
+function calculateSegmentArea(indices, width) {
+    const uniquePixels = new Set(indices.map(i => Math.floor(i / 4)));
+    return uniquePixels.size / (width * width); 
+}
+
+document.getElementById('fastProcessBtn').addEventListener('click', () => {
+    segmentedImages.forEach((segmentCanvas, index) => {
+        const imageData = getSegmentedImageData(index);
+        if (imageData) {
+            // console.log('imageData :>> ', imageData);
+            // fastProcessImage(imageData);
+        }
+    });
+});
+
+
+
+function applyEffect(effect, imageData, value, clickedPoints, lines) {
+    console.log('imageData :>> ', imageData);
+    return new Promise((resolve, reject) => {
+        if (!workers[effect]) {
+            reject(new Error(`Worker for effect ${effect} not found`));
+            return;
+        }
+        workers[effect].onmessage = function(e) {
+            if (e.data.error) {
+                reject(new Error(`Error in ${effect} worker: ${e.data.error}`));
+            } else {
+                resolve(e.data.imageData);
+            }
+        };
+        workers[effect].onerror = function(error) {
+            reject(new Error(`Error in ${effect} worker: ${error.message}`));
+        };
+
+        // console.log("Sending to worker:", { effect, value, clickedPoints, lines });
+
+        const serializedClickedPoints = clickedPoints.map(point => ({x: point.x, y: point.y}));
+        const serializedLines = lines.map(line => ({
+            start: {x: line.start.x, y: line.start.y},
+            end: {x: line.end.x, y: line.end.y}
+        }));
+        workers[effect].postMessage({ 
+            imageData: imageData, 
+            value: value,
+            value1: 1,
+            value2: 4,
+            value3: 7,
+            value4: 10,
+            clickedPoints: serializedClickedPoints,
+            lines: serializedLines,
+            debugMode: document.getElementById('debugMode').checked
+        });
+    });
+}
+
+
+function applyEffect1(effect, imageData, value, clickedPoints, lines) {
+    console.log('imageData :>> ', imageData);
+    return new Promise((resolve, reject) => {
+        if (!workers[effect]) {
+            reject(new Error(`Worker for effect ${effect} not found`));
+            return;
+        }
+        workers[effect].onmessage = function(e) {
+            if (e.data.error) {
+                reject(new Error(`Error in ${effect} worker: ${e.data.error}`));
+            } else {
+                resolve(e.data.imageData);
+            }
+        };
+        workers[effect].onerror = function(error) {
+            reject(new Error(`Error in ${effect} worker: ${error.message}`));
+        };
+
+        // console.log("Sending to worker:", { effect, value, clickedPoints, lines });
+
+        const serializedClickedPoints = clickedPoints.map(point => ({x: point.x, y: point.y}));
+        const serializedLines = lines.map(line => ({
+            start: {x: line.start.x, y: line.start.y},
+            end: {x: line.end.x, y: line.end.y}
+        }));
+        workers[effect].postMessage({ 
+            imageData: imageData, 
+            value: value,
+            value1: 1,
+            value2: 4,
+            value3: 7,
+            value4: 10,
+            clickedPoints: serializedClickedPoints,
+            lines: serializedLines,
+            debugMode: document.getElementById('debugMode').checked
+        });
+    });
+}
+
+
+function displayProcessedImages() {
+    const container = document.getElementById('resultsContainer');
+    container.innerHTML = '';
+    for (let effect in processedImages) {
+        const effectContainer = document.createElement('div');
+        effectContainer.className = 'effect-container';
+        effectContainer.innerHTML = `<h3>${effect}</h3>`;
+        processedImages[effect].forEach((processedImage, index) => {
+            const img = document.createElement('img');
+            img.src = processedImage.canvas.toDataURL();
+            img.style.width = '200px';
+            img.style.height = 'auto';
+            img.title = `${effect} - Frame ${index + 1}`;
+            effectContainer.appendChild(img);
+        });
+        container.appendChild(effectContainer);
+    }
+}
+
+        function updateEffectDisplay(effect) {
+            const effectButton = document.querySelector(`.effect-button[data-effect="${effect}"]`);
+            if (effectButton) effectButton.classList.add('processed');
+        }
+
+    async function fastProcessImage(img) {
+    processedImages = {};
+    const imageCount = parseInt(imageCountInput.value);
+    console.log('segmentIndex :>> ', segmentIndex);
+    console.log('segmentedImages :>> ', segmentedImages);
+    console.log('segmentCanvas :>> ', segmentCanvas);
+    for (let segmentIndex = 0; segmentIndex < segmentedImages.length; segmentIndex++) {
+        const { canvas: segmentCanvas, mask: segmentMask } = segmentedImages[segmentIndex];
+
+        const effectPromises = effects.filter(effect => document.getElementById(`${effect}Checkbox`).checked).map(async (effect) => {
+            processedImages[effect] = processedImages[effect] || [];
+            for (let i = 0; i < imageCount; i++) {
+                const canvas = document.createElement('canvas');
+                canvas.width = originalImage.width;
+                canvas.height = originalImage.height;
+                const ctx = canvas.getContext('2d');
+
+                // Draw the original image
+                ctx.drawImage(originalImage, 0, 0);
+
+                // Remove the segment from the original image
+                ctx.globalCompositeOperation = 'destination-out';
+                ctx.drawImage(segmentMask, 0, 0);
+                ctx.globalCompositeOperation = 'source-over';
+
+                // Apply effect to the segment
+                const segmentImageData = segmentCanvas.getContext('2d').getImageData(0, 0, segmentCanvas.width, segmentCanvas.height);
+                let value = getEffectValue(effect, i, imageCount);
+                try {
+                    const processedSegmentData = await applyEffect(effect, segmentImageData, value, clickedPoints, lines);
+                    
+                    // Draw the processed segment back onto the canvas
+                    const tempCanvas = document.createElement('canvas');
+                    tempCanvas.width = segmentCanvas.width;
+                    tempCanvas.height = segmentCanvas.height;
+                    tempCanvas.getContext('2d').putImageData(processedSegmentData, 0, 0);
+                    ctx.drawImage(tempCanvas, 0, 0);
+
+                    processedImages[effect].push({ value: value, canvas: canvas });
+                    updateEffectDisplay(effect);
+                } catch (error) {
+                    console.error(`Error processing effect ${effect} for segment ${segmentIndex}, image ${i+1}:`, error.message);
+                }
+            }
+        });
+        await Promise.all(effectPromises);
+    }
+    displayProcessedImages();
+}
+
+    function displaySegmentedImage(imageData) {
+        const canvas = document.createElement('canvas');
+        canvas.width = imageData.width;
+        canvas.height = imageData.height;
+        const ctx = canvas.getContext('2d');
+        ctx.putImageData(imageData, 0, 0);
+        document.getElementById('segmentedImage').src = canvas.toDataURL();
+    }
+   
+    function displayEffectImages(effect) {
+            resultsContainer.innerHTML = '';
+            if (document.getElementById(`${effect}Checkbox`).checked) {
+                const images = processedImages[effect];
+                if (images && images.length > 0) {
+                    images.forEach((imgData) => {
+                        const wrapper = document.createElement('div');
+                        wrapper.className = 'canvas-wrapper';
+                        const img = new Image();
+                        img.src = imgData.dataUrl;
+                        wrapper.appendChild(img);
+                        resultsContainer.appendChild(wrapper);
+                    });
+                } else {
+                    resultsContainer.textContent = 'Processing...';
+                }
+            } else {
+                resultsContainer.textContent = 'Effect not selected';
+            }
+        }
+        function getEffectValue(effect, index, count) {
+            const t = index / (count - 1);
+            switch(effect) {
+                case 'brightness': return Math.floor(t * 510) - 255;
+                case 'hue': return Math.floor(t * 360);
+                case 'saturation': return t * 2;
+                case 'vintage': case 'ink': case 'vibrance': case 'denoise': case 'hexagonalPixelate': case 'invert':
+                case 'perspectiveTilt': case 'perspectiveSqueeze': case 'perspectiveCurve': case 'perspectiveFisheye':
+                case 'perspectiveRotate': case 'perspectiveSkew': case 'perspectiveWarp': case 'perspectiveZoom':
+                case 'perspectiveTunnel': case 'perspectiveSphere': case 'perspectiveCylinder': case 'perspectiveRipple':
+                case 'perspectiveVortex': case 'perspectiveFold': case 'perspectivePixelate': case 'perspectiveEmboss':
+                case 'perspectiveMosaic': case 'perspectiveOilPainting': case 'perspectivePosterize':
+                    return t;
+                case 'bulgePinch': return [t, t * 2 - 1];
+                case 'swirl': return (t - 0.5) * 10;
+                case 'lensBlur': case 'triangularBlur': return t * 50;
+                case 'tiltShiftBlur': case 'zoomBlur': return [t, 1-t];
+                case 'edgeWork': return t * 10 + 1;
+                case 'dotScreen': case 'colorHalftone': return t * 10;
+                case 'perspectiveTwist': return t * Math.PI * 2;
+                case 'perspective': return [t, 1-t, t, 1-t];
+                case 'kaleidoscope': return Math.floor(t * 16) + 2;
+                case 'wavyDistortion': return [t * 50, (1-t) * 50, t * Math.PI * 2];
+                case 'blockDissolve': return Math.floor(t * 20) + 1;
+                case 'rgbShift': return [t * 10, (1-t) * 10, t * 10];
+                case 'chromaticAberration': return t * 20;
+                case 'droste': return [t * 5, (1-t) * 5, t * Math.PI * 2];
+                case 'running1': return [
+                        t * 10,           
+                        (1-t) * 5,        
+                        t * Math.PI * 2,  // Leg swing
+                        (1-t) * Math.PI   // Arm swing
+                    ];
+                case 'running2': return [
+                    t, // time
+                    0.5 + t * 1.5, // speed
+                    0.2 + t * 0.8 // intensity
+                ];
+                case 'running3': return t;
+                case 'running4': return t;
+                case 'running5': return t; 
+                case 'running6': return t;
+
+
+        case ' runningleg':
+        case ' runningleg2':
+        case ' runningleg3':
+        case ' runningleg4':
+        case 'removebg':
+        case 'imagesegment':
+        case 'segmentation':
+        case 'segmentation1':
+        case 'segmentation2':
+
+        default: return t;
+            }
+    }
+
+
+ function createOverlayCanvas(originalImage, processedImageData) {
+    const canvas = document.createElement('canvas');
+    canvas.width = originalImage.width;
+    canvas.height = originalImage.height;
+    const ctx = canvas.getContext('2d');
+    
+    // Draw the original image
+    ctx.drawImage(originalImage, 0, 0);
+    
+    // Draw the processed image on top with some transparency
+    ctx.globalAlpha = 0.7; // Adjust this value to change the overlay opacity
+    ctx.putImageData(processedImageData, 0, 0);
+    ctx.globalAlpha = 1.0; // Reset global alpha
+    
+    return canvas;
+ }
+
+
+
+
+
+
+let selectedRegions = []; // Array to store multiple selections
+let tolerance = 32;
+let magicWandMode = 'add';
+
+imageCanvas.addEventListener('click', handleCanvasClick);
+
+// imageCanvas.addEventListener('click', handleCanvasClick);
+
+const buttonContainer = document.createElement('div');
+buttonContainer.innerHTML = `
+    <button id="addMagicWand">Add Magic Wand</button>
+    <button id="subtractMagicWand">Subtract Magic Wand</button>
+    <button id="invertMagicWand">Invert Magic Wand</button>
+`;
+
+// Append the button container to an existing element
+// Replace 'existingContainerId' with the ID of an element in your HTML where you want to add these buttons
+
+document.getElementById('existingContainerId').appendChild(buttonContainer);
+
+// Add event listeners to the buttons
+document.getElementById('addMagicWand').addEventListener('click', () => {
+    magicWandMode = 'add';
+    // console.log('Magic Wand Mode set to: Add');
+});
+document.getElementById('subtractMagicWand').addEventListener('click', () => {
+    magicWandMode = 'subtract';
+    // console.log('Magic Wand Mode set to: Subtract');
+});
+document.getElementById('invertMagicWand').addEventListener('click', () => {
+    magicWandMode = 'invert';
+});
+
+function handleCanvasClick(event) {
+    const rect = imageCanvas.getBoundingClientRect();
+    const x = Math.floor((event.clientX - rect.left) / (rect.width / imageCanvas.width));
+    const y = Math.floor((event.clientY - rect.top) / (rect.height / imageCanvas.height));
+
+    const drawMode = document.querySelector('input[name="drawMode"]:checked').value;
+
+    if (drawMode === 'magicWand') {
+        performMagicWandSelection(x, y);
+    } else if (drawMode === 'point') {
+        clickedPoints.push({x, y});
+        drawClickedPoints();
+    } else if (drawMode === 'line') {
+        handleLineDrawing(x, y);
+    }
+}
+
+function performMagicWandSelection(startX, startY) {
+            const imageData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height);
+            const worker = new Worker('js/magicWandWorker.js');
+
+            worker.postMessage({
+                imageData: imageData,
+                startX: startX,
+                startY: startY,
+                tolerance: tolerance,
+                mode: magicWandMode
+            });
+
+            worker.onmessage = function(e) {
+                let newRegion = e.data.selectedRegion;
+                updateSelectedRegions(newRegion);
+                displaySelectedRegionsBorders();
+            };
+        }
+
+let segmentationQueue = [];
+let isProcessingSegmentation = false;
+
+
+
+function processSegmentationQueue() {
+    console.log("processsegmentationqueue");
+    if (isProcessingSegmentation || segmentationQueue.length === 0) {
+        console.log("removeed from procsssegmentation");
+        return;
+    }
+    
+    isProcessingSegmentation = true;
+    const region = segmentationQueue.shift();
+    
+    // Use requestAnimationFrame to process segmentation in the next frame
+    requestAnimationFrame(() => {
+        console.log("animationframe");
+        addSelectedRegionToSegmentedImages(region);
+        isProcessingSegmentation = false;
+        processSegmentationQueue();
+        
+    });
+}
+
+function startSegmentationProcessing() {
+    if (!isProcessingSegmentation) {
+        processSegmentationQueue();
+    }
+}
+
+document.querySelector("#imageCanvas").addEventListener('mouseup', function(e) {
+    // Your existing mouseup logic here
+    console.log("imagecanvas hover stopped");
+    // Start processing the segmentation queue
+    startSegmentationProcessing();
+});
+
+document.querySelector("#imageCanvas").addEventListener('mousedown', function(e) {
+    // Your existing mouseup logic here
+    console.log("imagecanvas hover mousedown stopped");
+    // Start processing the segmentation queue
+    startSegmentationProcessing();
+});
+
+function displaySelectedRegionsBorders() {
+    // Clear previous drawings and redraw the original image
+    ctx.clearRect(0, 0, imageCanvas.width, imageCanvas.height);
+    ctx.drawImage(originalImage, 0, 0);
+
+    // Create a temporary canvas to find the borders
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = imageCanvas.width;
+    tempCanvas.height = imageCanvas.height;
+    const tempCtx = tempCanvas.getContext('2d');
+    const imageData = tempCtx.createImageData(imageCanvas.width, imageCanvas.height);
+
+    // Fill all selected regions
+    selectedRegions.forEach(region => {
+        for (let i = 0; i < region.length; i++) {
+            const index = region[i] * 4;
+            imageData.data[index] = 255;
+            imageData.data[index + 1] = 255;
+            imageData.data[index + 2] = 255;
+            imageData.data[index + 3] = 255;
+        }
+    });
+
+    tempCtx.putImageData(imageData, 0, 0);
+
+    // Find and draw the borders
+    ctx.beginPath();
+    for (let y = 0; y < imageCanvas.height; y++) {
+        for (let x = 0; x < imageCanvas.width; x++) {
+            const index = (y * imageCanvas.width + x) * 4;
+            if (imageData.data[index + 3] > 0) {
+                if (x === 0 || y === 0 || x === imageCanvas.width - 1 || y === imageCanvas.height - 1 ||
+                    imageData.data[index - 4] === 0 || imageData.data[index + 4] === 0 ||
+                    imageData.data[index - imageCanvas.width * 4] === 0 || imageData.data[index + imageCanvas.width * 4] === 0) {
+                    ctx.rect(x, y, 1, 1);
+                }
+            }
+        }
+    }
+    ctx.strokeStyle = 'rgba(255, 0, 0, 0.8)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+}
+
+
+
+function displaySegmentedImages(segmentedImages) {
+    const container = document.getElementById('generatedImages');
+    container.innerHTML = '';
+
+    const canvas = document.createElement('canvas');
+    canvas.width = segmentedImages[0].width;
+    canvas.height = segmentedImages[0].height;
+    container.appendChild(canvas);
+
+    const ctx = canvas.getContext('2d');
+    let currentFrame = 0;
+
+    function animate() {
+    
+        ctx.putImageData(segmentedImages[currentFrame], 0, 0);
+        currentFrame = (currentFrame + 1) % segmentedImages.length;
+        setTimeout(animate, 200); 
+
+    }
+
+    animate();
+
+    
+}
+
+
+
+
+
+function handleCanvasClick(event) {
+    alert("clicked")
+    const rect = imageCanvas.getBoundingClientRect();
+    const x = Math.floor((event.clientX - rect.left) / (rect.width / imageCanvas.width));
+    const y = Math.floor((event.clientY - rect.top) / (rect.height / imageCanvas.height));
+    clickedPoints.push({x, y});
+    performMagicWandSelection(x, y);
+}
+
+function loadImage(e) {
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onload = function(event) {
+        originalImage = new Image();
+        originalImage.onload = function() {
+            imageCanvas.width = originalImage.width;
+            imageCanvas.height = originalImage.height;
+            ctx.drawImage(originalImage, 0, 0);
+            originalImageData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height);
+            displaySelectedRegionsBorders();
+        }
+        originalImage.src = event.target.result;
+    }
+    reader.readAsDataURL(file);
+}
+     
+function handleCanvasClick(event) {
+            const rect = imageCanvas.getBoundingClientRect();
+            const x = Math.floor((event.clientX - rect.left) / (rect.width / imageCanvas.width));
+            const y = Math.floor((event.clientY - rect.top) / (rect.height / imageCanvas.height));
+            performMagicWandSelection(x, y);
+        }
+
+function performMagicWandSelection(startX, startY) {
+            const imageData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height);
+            const worker = new Worker('js/magicWandWorker.js');
+
+            worker.postMessage({
+                imageData: imageData,
+                startX: startX,
+                startY: startY,
+                tolerance: tolerance,
+                mode: magicWandMode
+            });
+
+            worker.onmessage = function(e) {
+                let newRegion = e.data.selectedRegion;
+                updateSelectedRegions(newRegion);
+                displaySelectedRegionsBorders();
+            };
+        }
+
+function updateSelectedRegions(newRegion) {
+            if (magicWandMode === 'add') {
+                selectedRegions.push(newRegion);
+            } else if (magicWandMode === 'subtract') {
+                selectedRegions = selectedRegions.map(region => 
+                    region.filter(pixel => !newRegion.includes(pixel))
+                );
+            } else if (magicWandMode === 'invert') {
+                selectedRegions = selectedRegions.map(region => {
+                    let invertedRegion = region.filter(pixel => !newRegion.includes(pixel))
+                        .concat(newRegion.filter(pixel => !region.includes(pixel)));
+                    return invertedRegion;
+                });
+            }
+        }
+
+        function displaySelectedRegionsBorders() {
+            ctx.clearRect(0, 0, imageCanvas.width, imageCanvas.height);
+            ctx.drawImage(originalImage, 0, 0);
+
+            ctx.strokeStyle = 'red';
+            ctx.lineWidth = 1;
+
+            selectedRegions.forEach(region => {
+                ctx.beginPath();
+                region.forEach(pixelIndex => {
+                    const x = pixelIndex % imageCanvas.width;
+                    const y = Math.floor(pixelIndex / imageCanvas.width);
+                    ctx.rect(x, y, 1, 1);
+                });
+                ctx.stroke();
+            });
+        }
+
+
+
+function generateBrightnessVariations() {
+    const imageCount = parseInt(document.getElementById('imageCount').value);
+    const maxBrightness = parseInt(document.getElementById('brightness').value);
+    
+    const value1 = parseInt(document.getElementById('value1').value);
+    const value2 = parseInt(document.getElementById('value2').value);
+    const value3 = parseInt(document.getElementById('value3').value);
+    const value4 = parseInt(document.getElementById('value4').value);
+    const value5 = parseInt(document.getElementById('value5').value);
+
+    const worker = new Worker('js/brightnessWorker.js');
+    worker.postMessage({
+        imageData: originalImageData,  // Use originalImageData instead of canvas data
+        selectedRegions: selectedRegions,
+        imageCount: imageCount,
+        maxBrightness: maxBrightness,
+        value1: value1,
+        value2: value2,
+        value3: value3,
+        value4: value4,
+        value5: value5,
+        clickedPoints: clickedPoints,
+        lines: lines
+    });
+
+    worker.onmessage = function(e) {
+        displaySegmentedImages(e.data.segmentedImages);
+    };
+}
+
+function addLine(x1, y1, x2, y2) {
+    lines.push({x1, y1, x2, y2});
+}
+
+
+        
+  
+  
+  </script>
+</body>
+</html>

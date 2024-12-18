@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Magic Wand Tool with Brightness Adjustment</title>
+    <style>
+        #imageCanvas { border: 1px solid black; }
+        #generatedImages img { max-width: 1000px; margin: 5px; }
+        #generatedImages {
+            display: grid;
+            gap: 20px;
+        }
+        .effect-container {
+            text-align: center;
+        }
+        .effect-container canvas {
+            max-width: 100%;
+            height: auto;
+        }
+        .gif-container {
+            margin-bottom: 20px;
+        }
+        .segmented-images {
+            display: flex;
+            flex-wrap: nowrap;
+            overflow-x: auto;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .segment-wrapper {
+            flex: 0 0 auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .segment-wrapper p {
+            margin: 5px 0;
+            font-size: 14px;
+        }
+        .segment-wrapper canvas {
+            border: 1px solid #ddd;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <input type="file" id="imageUpload" accept="image/*">
+        <button id="addMagicWand">Add</button>
+        <button id="subtractMagicWand">Subtract</button>
+        <button id="invertMagicWand">Invert</button>
+        <label for="tolerance">Tolerance:</label>
+        <input type="range" id="tolerance" min="0" max="255" value="32">
+        <label for="imageCount">Image Count:</label>
+        <input type="number" id="imageCount" min="1" value="5">
+        <label for="brightness">Max Brightness Change:</label>
+        <input type="range" id="brightness" min="0" max="255" value="100">
+        <button id="generateImages">Generate Images</button>
+        <button id="generateGIF">Generate GIF</button>
+        <input type="number" id="value1" value="0">
+        <input type="number" id="value2" value="0">
+        <input type="number" id="value3" value="0">
+        <input type="number" id="value4" value="0">
+        <input type="number" id="value5" value="0">
+        <select id="effectSelect">
+            <option value="brightness2">Brightness</option>
+            <option value="hue1">Hue1</option>
+            <option value="saturation">Saturation</option>
+        </select>
+        <div>
+            <label for="widthInput">Target Width:</label>
+            <input type="number" id="widthInput" min="1" step="1">
+        </div>
+        <div>
+            <label for="heightInput">Target Height:</label>
+            <input type="number" id="heightInput" min="1" step="1">
+        </div>
+        <button id="resizeButton">Resize Image</button>
+        <button id="toggleDraw">Toggle Draw Mode</button>
+        <button id="removeObject">Remove Object</button>
+    </div>
+    <canvas id="imageCanvas"></canvas>
+    <div id="generatedImages"></div>
+    <div id="segmentsContainer"></div>
+    <div id="progress"></div> <!-- Added progress div -->
+    <script>
+        let imageCanvas, ctx, originalImage;
+        let selectedRegions = [];
+        let tolerance = 32;
+        let magicWandMode = 'add';
+        let clickedPoints = [];
+        let drawMode = false;
+        let objectMask = null;
+        let isDrawing = false;
+        let worker = null;
+        let progressDiv; // Declare progressDiv
+
+        document.getElementById('imageUpload').addEventListener('change', loadImage);
+        document.getElementById('addMagicWand').addEventListener('click', () => magicWandMode = 'add');
+        document.getElementById('subtractMagicWand').addEventListener('click', () => magicWandMode = 'subtract');
+        document.getElementById('invertMagicWand').addEventListener('click', () => magicWandMode = 'invert');
+        document.getElementById('tolerance').addEventListener('input', (e) => tolerance = parseInt(e.target.value));
+        document.getElementById('generateImages').addEventListener('click', generateEffectVariations);
+        document.getElementById('resizeButton').addEventListener('click', startResizing);
+        document.getElementById('toggleDraw').addEventListener('click', toggleDrawMode);
+        document.getElementById('removeObject').addEventListener('click', performObjectRemoval);
+
+        window.onload = loadImage;
+        imageCanvas = document.getElementById('imageCanvas');
+        ctx = imageCanvas.getContext('2d');
+        progressDiv = document.getElementById('progress'); // Initialize progressDiv
+        imageCanvas.addEventListener('click', handleCanvasClick);
+        imageCanvas.addEventListener('mousedown', startDrawing);
+        imageCanvas.addEventListener('mousemove', draw);
+        imageCanvas.addEventListener('mouseup', stopDrawing);
+
+        function loadImage() {
+            originalImage = new Image();
+            originalImage.onload = function() {
+                imageCanvas.width = originalImage.width;
+                imageCanvas.height = originalImage.height;
+                ctx.drawImage(originalImage, 0, 0);
+                originalImageData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height);
+                window.uploadedImageData = originalImageData;
+                displaySelectedRegionsBorders();
+
+                // Initialize maskData
+                maskData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height);
+                objectMask = matrix(imageCanvas.width, imageCanvas.height, false);
+            }
+            originalImage.src = 'face.jpg';
+        }
+
+        function handleCanvasClick(event) {
+            const rect = imageCanvas.getBoundingClientRect();
+            const x = Math.floor((event.clientX - rect.left) / (rect.width / imageCanvas.width));
+            const y = Math.floor((event.clientY - rect.top) / (rect.height / imageCanvas.height));
+            performMagicWandSelection(x, y);
+        }
+
+        function performMagicWandSelection(startX, startY) {
+            const imageData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height);
+            const worker = new Worker('magicWand1Worker.js');
+            worker.postMessage({
+                imageData: imageData,
+                startX: startX,
+                startY: startY,
+                tolerance: tolerance,
+                mode: magicWandMode
+            });
+            worker.onmessage = function(e) {
+                let newRegion = e.data.selectedRegion;
+                updateSelectedRegions(newRegion);
+                updateObjectMask(newRegion); // Update object mask with new region
+                displaySelectedRegionsBorders();
+            };
+        }
+
+        function updateSelectedRegions(newRegion) {
+            if (magicWandMode === 'add') {
+                selectedRegions.push(newRegion);
+            } else if (magicWandMode === 'subtract') {
+                selectedRegions = selectedRegions.map(region => 
+                    region.filter(pixel => !newRegion.includes(pixel))
+                );
+            } else if (magicWandMode === 'invert') {
+                selectedRegions = selectedRegions.map(region => {
+                    let invertedRegion = region.filter(pixel => !newRegion.includes(pixel))
+                        .concat(newRegion.filter(pixel => !region.includes(pixel)));
+                    return invertedRegion;
+                });
+            }
+        }
+
+        function updateObjectMask(newRegion) {
+            newRegion.forEach(pixelIndex => {
+                const x = pixelIndex % imageCanvas.width;
+                const y = Math.floor(pixelIndex / imageCanvas.width);
+                objectMask[y][x] = true;
+            });
+        }
+
+        function displaySelectedRegionsBorders() {
+            ctx.clearRect(0, 0, imageCanvas.width, imageCanvas.height);
+            ctx.drawImage(originalImage, 0, 0);
+            ctx.strokeStyle = 'red';
+            ctx.lineWidth = 1;
+            selectedRegions.forEach(region => {
+                ctx.beginPath();
+                region.forEach(pixelIndex => {
+                    const x = pixelIndex % imageCanvas.width;
+                    const y = Math.floor(pixelIndex / imageCanvas.width);
+                    ctx.rect(x, y, 1, 1);
+                });
+                ctx.stroke();
+            });
+        }
+
+        function generateEffectVariations() {
+            const imageCount = parseInt(document.getElementById('imageCount').value);
+            const maxBrightness = parseInt(document.getElementById('brightness').value);
+            const value1 = parseInt(document.getElementById('value1').value);
+            const value2 = parseInt(document.getElementById('value2').value);
+            const value3 = parseInt(document.getElementById('value3').value);
+            const value4 = parseInt(document.getElementById('value4').value);
+            const value5 = parseInt(document.getElementById('value5').value);
+
+            const effects = ['faceindexbackground', 'faceindexmovement'];
+
+            const workerPromises = [];
+console.log(effects);
+            effects.forEach(effect => {
+                const worker = new Worker(`${effect}Worker.js`);
+                console.log(selectedRegions);
+                console.log(selectedRegion);
+                worker.postMessage({
+                    imageData: originalImageData,
+                    selectedRegions: selectedRegions,
+                    imageCount: imageCount,
+                    maxBrightness: maxBrightness,
+                    value1: value1,
+                    value2: value2,
+                    value3: value3,
+                    value4: value4,
+                    value5: value5,
+                    clickedPoints: clickedPoints
+                });
+
+                const workerPromise = new Promise((resolve, reject) => {
+                    worker.onmessage = function(e) {
+                        if (e.data.isComplete) {
+                            resolve({ effect: effect, segmentedImages: e.data.segmentedImages });
+                        }
+                    };
+                });
+
+                workerPromises.push(workerPromise);
+            });
+
+            Promise.all(workerPromises).then(allEffectsResults => {
+                displayCombinedEffects(allEffectsResults);
+            });
+        }
+
+        function displayCombinedEffects(allEffectsResults) {
+            const container = document.getElementById('generatedImages');
+            container.innerHTML = '';
+            
+            const backgroundEffect = allEffectsResults.find(result => result.effect === 'faceindexbackground');
+            const movementEffect = allEffectsResults.find(result => result.effect === 'faceindexmovement');
+            
+            if (backgroundEffect && movementEffect) {
+                const effectContainer = document.createElement('div');
+                effectContainer.className = 'effect-container';
+                
+                const effectLabel = document.createEslement('h3');
+                effectLabel.textContent = 'Combined Effect';
+                effectContainer.appendChild(effectLabel);
+                
+                // Create and display combined effect
+                const combinedFrames = createCombinedFrames(backgroundEffect.segmentedImages[0], movementEffect.segmentedImages);
+                const combinedCanvas = createAnimatedCanvas('Combined Effect', combinedFrames);
+                effectContainer.appendChild(combinedCanvas);
+                
+                container.appendChild(effectContainer);
+            }
+        }
+
+        function createCombinedFrames(backgroundImageData, movementFrames) {
+            const combinedFrames = [];
+            
+            movementFrames.forEach((movementFrame) => {
+                const canvas = document.createElement('canvas');
+                canvas.width = backgroundImageData.width;
+                canvas.height = backgroundImageData.height;
+                const ctx = canvas.getContext('2d');
+                
+                // Draw background
+                ctx.putImageData(backgroundImageData, 0, 0);
+                
+                // Draw movement on top, preserving alpha
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = movementFrame.width;
+                tempCanvas.height = movementFrame.height;
+                const tempCtx = tempCanvas.getContext('2d');
+                tempCtx.putImageData(movementFrame, 0, 0);
+                
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.drawImage(tempCanvas, 0, 0);
+                
+                const combinedImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                combinedFrames.push(combinedImageData);
+            });
+            
+            return combinedFrames;
+        }
+
+        function createAnimatedCanvas(title, frames) {
+            const container = document.createElement('div');
+            container.className = 'animated-canvas-container';
+
+            const titleElement = document.createElement('h4');
+            titleElement.textContent = title;
+            container.appendChild(titleElement);
+
+            const canvas = document.createElement('canvas');
+            canvas.width = frames[0].width;
+            canvas.height = frames[0].height;
+            container.appendChild(canvas);
+
+            const ctx = canvas.getContext('2d');
+            let currentFrame = 0;
+
+            function animate() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.putImageData(frames[currentFrame], 0, 0);
+                currentFrame = (currentFrame + 1) % frames.length;
+                requestAnimationFrame(animate);
+            }
+
+            animate();
+
+            return container;
+        }
+
+        function startResizing() {
+            const toWidth = parseInt(document.getElementById('widthInput').value);
+            const toHeight = parseInt(document.getElementById('heightInput').value);
+
+            if (toWidth >= originalImage.width && toHeight >= originalImage.height) {
+                alert('Please enter at least one dimension smaller than the original image.');
+                return;
+            }
+
+            const resizedImageData = new ImageData(
+                new Uint8ClampedArray(originalImageData.data),
+                originalImageData.width,
+                originalImageData.height
+            );
+
+            resizeImage(
+                resizedImageData,
+                toWidth,
+                toHeight,
+                ({ step, steps }) => {
+                    progressDiv.textContent = `Resizing... ${Math.round((step / steps) * 100)}%`;
+                }
+            ).then(() => {
+                imageCanvas.width = toWidth;
+                imageCanvas.height = toHeight;
+                ctx.putImageData(resizedImageData, 0, 0);
+                progressDiv.textContent = 'Resizing complete!';
+            });
+        }
+
+        function toggleDrawMode() {
+            drawMode = !drawMode;
+            document.getElementById('toggleDraw').textContent = drawMode ? 'Disable Draw' : 'Enable Draw';
+        }
+
+        function startDrawing(e) {
+            if (!drawMode) return;
+            isDrawing = true;
+            draw(e);
+        }
+
+        function draw(e) {
+            if (!isDrawing || !drawMode) return;
+            const rect = imageCanvas.getBoundingClientRect();
+            const x = Math.floor(e.clientX - rect.left);
+            const y = Math.floor(e.clientY - rect.top);
+
+            ctx.fillStyle = 'rgba(255, 0, 0, 0.5)';
+            ctx.beginPath();
+            ctx.arc(x, y, 5, 0, Math.PI * 2);
+            ctx.fill();
+
+            for (let i = -5; i <= 5; i++) {
+                for (let j = -5; j <= 5; j++) {
+                    if (x + i >= 0 && x + i < imageCanvas.width && y + j >= 0 && y + j < imageCanvas.height) {
+                        objectMask[y + j][x + i] = true;
+                    }
+                }
+            }
+        }
+
+        function stopDrawing() {
+            isDrawing = false;
+        }
+
+        function performObjectRemoval() {
+            const imageData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height);
+            worker = new Worker('removeobjectworker.js');
+            worker.onmessage = function(event) {
+                const { img, size } = event.data;
+                imageCanvas.width = size.w;
+                imageCanvas.height = size.h;
+                ctx.putImageData(img, 0, 0);
+                console.log('Object removal complete');
+            };
+            worker.postMessage({ imageData, objectMask });
+        }
+
+        // Add the necessary functions for resizing and object removal here
+        function getPixelDeleteEnergy() {
+            const numColors = 3;
+            const maxColorDistance = 255;
+            const numNeighbors = 2;
+            const multiplier = 2;
+            const maxSeamSize = Math.max(1500, 1500);
+            return -1 * multiplier * numNeighbors * maxSeamSize * numColors * (maxColorDistance ** 2);
+        }
+
+        function matrix(w, h, filler) {
+            return new Array(h).fill(null).map(() => new Array(w).fill(filler));
+        }
+
+        function getPixel(img, { x, y }) {
+            const index = (y * img.width + x) * 4;
+            return [
+                img.data[index],
+                img.data[index + 1],
+                img.data[index + 2],
+                img.data[index + 3]
+            ];
+        }
+
+        function setPixel(img, { x, y }, color) {
+            const index = (y * img.width + x) * 4;
+            img.data[index] = color[0];
+            img.data[index + 1] = color[1];
+            img.data[index + 2] = color[2];
+            img.data[index + 3] = color[3];
+        }
+
+        function getPixelEnergy(left, middle, right) {
+            const [mR, mG, mB, mA] = middle;
+
+            // Check if this pixel is marked for removal
+            const maskIndex = (middle.y * size.w + middle.x) * 4;
+            if (maskData && maskData.data[maskIndex + 3] > 0) {
+                return getPixelDeleteEnergy(); // Very low energy for marked pixels
+            }
+
+            let lEnergy = 0;
+            if (left) {
+                const [lR, lG, lB] = left;
+                lEnergy = (lR - mR) ** 2 + (lG - mG) ** 2 + (lB - mB) ** 2;
+            }
+
+            let rEnergy = 0;
+            if (right) {
+                const [rR, rG, rB] = right;
+                rEnergy = (rR - mR) ** 2 + (rG - mG) ** 2 + (rB - mB) ** 2;
+            }
+
+            return mA > 244 ? (lEnergy + rEnergy) : getPixelDeleteEnergy();
+        }
+
+        function getPixelEnergyH(img, { w }, { x, y }) {
+            const left = (x - 1) >= 0 ? getPixel(img, { x: x - 1, y }) : null;
+            const middle = getPixel(img, { x, y });
+            const right = (x + 1) < w ? getPixel(img, { x: x + 1, y }) : null;
+            return getPixelEnergy(left, middle, right);
+        }
+
+        function getPixelEnergyV(img, { h }, { x, y }) {
+            const top = (y - 1) >= 0 ? getPixel(img, { x, y: y - 1 }) : null;
+            const middle = getPixel(img, { x, y });
+            const bottom = (y + 1) < h ? getPixel(img, { x, y: y + 1 }) : null;
+            return getPixelEnergy(top, middle, bottom);
+        }
+
+        function calculateEnergyMapH(img, { w, h }) {
+            const energyMap = matrix(w, h, Infinity);
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    energyMap[y][x] = getPixelEnergyH(img, { w, h }, { x, y });
+                }
+            }
+            return energyMap;
+        }
+
+        function calculateEnergyMapV(img, { w, h }) {
+            const energyMap = matrix(w, h, Infinity);
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    energyMap[y][x] = getPixelEnergyV(img, { w, h }, { x, y });
+                }
+            }
+            return energyMap;
+        }
+
+        function reCalculateEnergyMapH(img, { w, h }, energyMap, seam) {
+            seam.forEach(({ x: seamX, y: seamY }) => {
+                for (let x = seamX; x < (w - 1); x++) {
+                    energyMap[seamY][x] = energyMap[seamY][x + 1];
+                }
+                energyMap[seamY][seamX] = getPixelEnergyH(img, { w, h }, { x: seamX, y: seamY });
+            });
+            return energyMap;
+        }
+
+        function reCalculateEnergyMapV(img, { w, h }, energyMap, seam) {
+            seam.forEach(({ x: seamX, y: seamY }) => {
+                for (let y = seamY; y < (h - 1); y++) {
+                    energyMap[y][seamX] = energyMap[y + 1][seamX];
+                }
+                energyMap[seamY][seamX] = getPixelEnergyV(img, { w, h }, { x: seamX, y: seamY });
+            });
+            return energyMap;
+        }
+
+        function findLowEnergySeamH(energyMap, { w, h }) {
+            const seamsMap = matrix(w, h, null);
+
+            for (let x = 0; x < w; x++) {
+                seamsMap[0][x] = {
+                    energy: energyMap[0][x],
+                    coordinate: { x, y: 0 },
+                    previous: null,
+                };
+            }
+
+            for (let y = 1; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    let minPrevEnergy = Infinity;
+                    let minPrevX = x;
+                    for (let i = (x - 1); i <= (x + 1); i++) {
+                        if (i >= 0 && i < w && seamsMap[y - 1][i].energy < minPrevEnergy) {
+                            minPrevEnergy = seamsMap[y - 1][i].energy;
+                            minPrevX = i;
+                        }
+                    }
+
+                    seamsMap[y][x] = {
+                        energy: minPrevEnergy + energyMap[y][x],
+                        coordinate: { x, y },
+                        previous: { x: minPrevX, y: y - 1 },
+                    };
+                }
+            }
+
+            let lastMinCoordinate = null;
+            let minSeamEnergy = Infinity;
+            for (let x = 0; x < w; x++) {
+                if (seamsMap[h - 1][x].energy < minSeamEnergy) {
+                    minSeamEnergy = seamsMap[h - 1][x].energy;
+                    lastMinCoordinate = { x, y: h - 1 };
+                }
+            }
+
+            const seam = [];
+            if (!lastMinCoordinate) {
+                return seam;
+            }
+
+            let currentSeam = seamsMap[lastMinCoordinate.y][lastMinCoordinate.x];
+            while (currentSeam) {
+                seam.push(currentSeam.coordinate);
+                const prevMinCoordinates = currentSeam.previous;
+                if (!prevMinCoordinates) {
+                    currentSeam = null;
+                } else {
+                    currentSeam = seamsMap[prevMinCoordinates.y][prevMinCoordinates.x];
+                }
+            }
+
+            return seam;
+        }
+
+        function findLowEnergySeamV(energyMap, { w, h }) {
+            const seamsMap = matrix(w, h, null);
+
+            for (let y = 0; y < h; y++) {
+                seamsMap[y][0] = {
+                    energy: energyMap[y][0],
+                    coordinate: { x: 0, y },
+                    previous: null,
+                };
+            }
+
+            for (let x = 1; x < w; x++) {
+                for (let y = 0; y < h; y++) {
+                    let minPrevEnergy = Infinity;
+                    let minPrevY = y;
+                    for (let i = (y - 1); i <= (y + 1); i++) {
+                        if (i >= 0 && i < h && seamsMap[i][x - 1].energy < minPrevEnergy) {
+                            minPrevEnergy = seamsMap[i][x - 1].energy;
+                            minPrevY = i;
+                        }
+                    }
+
+                    seamsMap[y][x] = {
+                        energy: minPrevEnergy + energyMap[y][x],
+                        coordinate: { x, y },
+                        previous: { x: x - 1, y: minPrevY },
+                    };
+                }
+            }
+
+            let lastMinCoordinate = null;
+            let minSeamEnergy = Infinity;
+            for (let y = 0; y < h; y++) {
+                if (seamsMap[y][w - 1].energy < minSeamEnergy) {
+                    minSeamEnergy = seamsMap[y][w - 1].energy;
+                    lastMinCoordinate = { x: w - 1, y };
+                }
+            }
+
+            const seam = [];
+            if (!lastMinCoordinate) {
+                return seam;
+            }
+
+            let currentSeam = seamsMap[lastMinCoordinate.y][lastMinCoordinate.x];
+            while (currentSeam) {
+                seam.push(currentSeam.coordinate);
+                const prevMinCoordinates = currentSeam.previous;
+                if (!prevMinCoordinates) {
+                    currentSeam = null;
+                } else {
+                    currentSeam = seamsMap[prevMinCoordinates.y][prevMinCoordinates.x];
+                }
+            }
+
+            return seam;
+        }
+
+        function deleteSeamH(img, seam, { w }) {
+            seam.forEach(({ x: seamX, y: seamY }) => {
+                for (let x = seamX; x < (w - 1); x++) {
+                    const nextPixel = getPixel(img, { x: x + 1, y: seamY });
+                    setPixel(img, { x, y: seamY }, nextPixel);
+                }
+            });
+        }
+
+        function deleteSeamV(img, seam, { h }) {
+            seam.forEach(({ x: seamX, y: seamY }) => {
+                for (let y = seamY; y < (h - 1); y++) {
+                    const nextPixel = getPixel(img, { x: seamX, y: y + 1 });
+                    setPixel(img, { x: seamX, y }, nextPixel);
+                }
+            });
+        }
+
+        async function resizeImageWidth(img, toSize, onIteration) {
+            const pxToRemove = img.width - toSize;
+            if (pxToRemove < 0) {
+                throw new Error('Upsizing is not supported');
+            }
+
+            let energyMap = null;
+            let seam = null;
+
+            for (let i = 0; i < pxToRemove; i++) {
+                energyMap = energyMap && seam
+                    ? reCalculateEnergyMapH(img, size, energyMap, seam)
+                    : calculateEnergyMapH(img, size);
+
+                seam = findLowEnergySeamH(energyMap, size);
+
+                deleteSeamH(img, seam, size);
+
+                if (onIteration) {
+                    await onIteration({
+                        energyMap,
+                        seam,
+                        img,
+                        size,
+                        step: i,
+                        steps: pxToRemove,
+                    });
+                }
+
+                size.w -= 1;
+
+                await new Promise(resolve => setTimeout(resolve, 1));
+            }
+        }
+
+        async function resizeImageHeight(img, toSize, onIteration) {
+            const pxToRemove = img.height - toSize;
+            if (pxToRemove < 0) {
+                throw new Error('Upsizing is not supported');
+            }
+
+            let energyMap = null;
+            let seam = null;
+
+            for (let i = 0; i < pxToRemove; i++) {
+                energyMap = energyMap && seam
+                    ? reCalculateEnergyMapV(img, size, energyMap, seam)
+                    : calculateEnergyMapV(img, size);
+
+                seam = findLowEnergySeamV(energyMap, size);
+
+                deleteSeamV(img, seam, size);
+
+                if (onIteration) {
+                    await onIteration({
+                        energyMap,
+                        seam,
+                        img,
+                        size,
+                        step: i,
+                        steps: pxToRemove,
+                    });
+                }
+
+                size.h -= 1;
+
+                await new Promise(resolve => setTimeout(resolve, 1));
+            }
+        }
+
+        async function resizeImage(img, toWidth, toHeight, onIteration) {
+            const pxToRemoveH = img.width - toWidth;
+            const pxToRemoveV = img.height - toHeight;
+
+            size = { w: img.width, h: img.height };
+
+            const globalSteps = pxToRemoveH + pxToRemoveV;
+            let globalStep = 0;
+
+            const onResizeIteration = async (onIterationArgs) => {
+                const {
+                    seam,
+                    img: onIterationImg,
+                    size: onIterationSize,
+                    energyMap,
+                } = onIterationArgs;
+
+                globalStep += 1;
+
+                if (!onIteration) {
+                    return;
+                }
+
+                await onIteration({
+                    seam,
+                    img: onIterationImg,
+                    size: onIterationSize,
+                    energyMap,
+                    step: globalStep,
+                    steps: globalSteps,
+                });
+            };
+
+            await resizeImageWidth(img, toWidth, onResizeIteration);
+            await resizeImageHeight(img, toHeight, onResizeIteration);
+        }
+    </script>
+</body>
+</html>

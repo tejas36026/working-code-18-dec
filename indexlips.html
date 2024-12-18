@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lip Sync Animation</title>
+</head>
+<body>
+    <canvas id="animationCanvas" width="300" height="300"></canvas>
+    <script>
+        const canvas = document.getElementById('animationCanvas');
+        const ctx = canvas.getContext('2d');
+        const worker = new Worker('js/indexlips.js');
+
+        const img = new Image();
+        img.onload = function() {
+            canvas.width = img.width;
+            canvas.height = img.height;
+            ctx.drawImage(img, 0, 0);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+            // Simplified lip region selection (lower half of the image)
+            const lipRegion = new Set();
+            for (let y = Math.floor(canvas.height / 2); y < canvas.height; y++) {
+                for (let x = 0; x < canvas.width; x++) {
+                    lipRegion.add(y * canvas.width + x);
+                }
+            }
+
+            worker.postMessage({
+                imageData: imageData,
+                selectedRegions: Array.from(lipRegion),
+                imageCount: 10
+            });
+        };
+        img.src = 'lips12.png';
+
+        worker.onmessage = function(e) {
+            const { segmentedImages, isComplete } = e.data;
+            
+            let frameIndex = 0;
+            function animateFrame() {
+                if (frameIndex < segmentedImages.length) {
+                    ctx.putImageData(segmentedImages[frameIndex], 0, 0);
+                    frameIndex++;
+                    requestAnimationFrame(animateFrame);
+                } else if (!isComplete) {
+                    frameIndex = 0;
+                    requestAnimationFrame(animateFrame);
+                }
+            }
+            animateFrame();
+
+            if (isComplete) {
+                console.log('Animation complete');
+            }
+        };
+    </script>
+</body>
+</html>

@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Magic Wand Tool with Brightness Adjustment</title>
+    <style>
+        #imageCanvas { border: 1px solid black; }
+        #generatedImages img { max-width: 1000px; margin: 5px; }
+        #generatedImages { display: grid; gap: 20px; }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <input type="file" id="imageUpload" accept="image/*">
+        <button id="addMagicWand">Add</button>
+        <button id="subtractMagicWand">Subtract</button>
+        <button id="invertMagicWand">Invert</button>
+        <label for="tolerance">Tolerance:</label>
+        <input type="range" id="tolerance" min="0" max="255" value="32">
+        <label for="imageCount">Image Count:</label>
+        <input type="number" id="imageCount" min="1" value="5">
+        <label for="brightness">Max Brightness Change:</label>
+        <input type="range" id="brightness" min="0" max="255" value="100">
+        <button id="generateImages">Generate Images</button>
+    </div>
+    <canvas id="imageCanvas"></canvas>
+    <div id="generatedImages"></div>
+    <script>
+        let imageCanvas, ctx, originalImage, originalImageData;
+        let selectedRegions = [];
+        let tolerance = 32;
+        let magicWandMode = 'add';
+
+        document.getElementById('imageUpload').addEventListener('change', loadImage);
+        document.getElementById('addMagicWand').addEventListener('click', () => magicWandMode = 'add');
+        document.getElementById('subtractMagicWand').addEventListener('click', () => magicWandMode = 'subtract');
+        document.getElementById('invertMagicWand').addEventListener('click', () => magicWandMode = 'invert');
+        document.getElementById('tolerance').addEventListener('input', (e) => tolerance = parseInt(e.target.value));
+        document.getElementById('generateImages').addEventListener('click', combineBackgroundAndNonSelected);
+
+        function loadImage() {
+            originalImage = new Image();
+            originalImage.onload = function() {
+                imageCanvas.width = originalImage.width;
+                imageCanvas.height = originalImage.height;
+                ctx.drawImage(originalImage, 0, 0);
+                originalImageData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height);
+                redrawCanvas();
+            }
+            originalImage.src = URL.createObjectURL(document.getElementById('imageUpload').files[0]);
+        }
+
+        function performMagicWandSelection(startX, startY) {
+            const imageData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height);
+            const worker = new Worker('js/magicWand1Worker.js');
+            worker.postMessage({
+                imageData: imageData,
+                startX: startX,
+                startY: startY,
+                tolerance: tolerance,
+                mode: magicWandMode
+            });
+            worker.onmessage = function(e) {
+                let newRegion = e.data.selectedRegion;
+                updateSelectedRegions(newRegion);
+                redrawCanvas();
+            };
+        }
+
+        function updateSelectedRegions(newRegion) {
+            if (magicWandMode === 'add') {
+                selectedRegions.push(newRegion);
+            } else if (magicWandMode === 'subtract') {
+                selectedRegions = selectedRegions.map(region => 
+                    region.filter(pixel => !newRegion.includes(pixel))
+                );
+            } else if (magicWandMode === 'invert') {
+                selectedRegions = selectedRegions.map(region => {
+                    let invertedRegion = region.filter(pixel => !newRegion.includes(pixel))
+                        .concat(newRegion.filter(pixel => !region.includes(pixel)));
+                    return invertedRegion;
+                });
+            }
+        }
+
+        function redrawCanvas() {
+            ctx.clearRect(0, 0, imageCanvas.width, imageCanvas.height);
+            ctx.drawImage(originalImage, 0, 0);
+            displaySelectedRegionsBorders();
+        }
+
+        function displaySelectedRegionsBorders() {
+            ctx.strokeStyle = 'red';
+            ctx.lineWidth = 1;
+            selectedRegions.forEach(region => {
+                ctx.beginPath();
+                region.forEach(pixelIndex => {
+                    const x = pixelIndex % imageCanvas.width;
+                    const y = Math.floor(pixelIndex / imageCanvas.width);
+                    ctx.rect(x, y, 1, 1);
+                });
+                ctx.stroke();
+            });
+        }
+
+        function combineBackgroundAndNonSelected() {
+            const imageCount = parseInt(document.getElementById('imageCount').value);
+            const maxBrightness = parseInt(document.getElementById('brightness').value);
+
+            const backgroundWorker = new Worker('js/backgroundpredict7Worker.js');
+            backgroundWorker.postMessage({
+                imageData: originalImageData,
+                selectedRegions: selectedRegions,
+                imageCount: imageCount,
+                maxBrightness: maxBrightness
+            });
+            backgroundWorker.onmessage = (e) => {
+                const backgroundResult = e.data;
+                console.log('Background Result:', backgroundResult);
+                
+                // Modify this line to pass the segmentedImages array directly
+                displaySeparateResults(backgroundResult.segmentedImages);
+            };
+        }
+
+        function displaySeparateResults(segmentImages) {
+            const container = document.getElementById('generatedImages');
+            container.innerHTML = ''; // Clear previous results
+
+            if (!segmentImages || segmentImages.length === 0) {
+                console.error('No segmented images to display');
+                return;
+            }
+
+            const gifContainer = createGifContainer('Segmented Images', segmentImages);
+            if (gifContainer) {
+                container.appendChild(gifContainer);
+            }
+        }
+
+        function createGifContainer(title, images) {
+            if (!images || images.length === 0) {
+                console.error('No images provided for GIF container:', title);
+                return null;
+            }
+
+            const gifContainer = document.createElement('div');
+            gifContainer.className = 'gif-container';
+
+            const titleElement = document.createElement('h4');
+            titleElement.textContent = title;
+            gifContainer.appendChild(titleElement);
+
+            const canvas = document.createElement('canvas');
+            canvas.width = images[0].width;
+            canvas.height = images[0].height;
+            gifContainer.appendChild(canvas);
+
+            const ctx = canvas.getContext('2d');
+            let currentFrame = 0;
+
+            function animate() {
+                if (images[currentFrame]) {
+                    ctx.putImageData(images[currentFrame], 0, 0);
+                    currentFrame = (currentFrame + 1) % images.length;
+                    setTimeout(animate, 200);
+                }
+            }
+
+            animate();
+            return gifContainer;
+        }
+
+        imageCanvas = document.getElementById('imageCanvas');
+        ctx = imageCanvas.getContext('2d');
+        imageCanvas.addEventListener('click', function(event) {
+            const rect = imageCanvas.getBoundingClientRect();
+            const x = Math.floor((event.clientX - rect.left) / (rect.width / imageCanvas.width));
+            const y = Math.floor((event.clientY - rect.top) / (rect.height / imageCanvas.height));
+            performMagicWandSelection(x, y);
+        });
+    </script>
+</body>
+</html>

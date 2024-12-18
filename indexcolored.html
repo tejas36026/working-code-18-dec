@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Segmentation Demo</title>
+</head>
+<body>
+
+    <input type="file" id="imageInput" accept="image/*">
+    <canvas id="originalCanvas"></canvas>
+    <canvas id="segmentedCanvas"></canvas>
+    <div id="result"></div>
+
+    <script>
+        const worker = new Worker('segmentation1Worker.js');
+        const imageInput = document.getElementById('imageInput');
+        const originalCanvas = document.getElementById('originalCanvas');
+        const segmentedCanvas = document.getElementById('segmentedCanvas');
+        const resultDiv = document.getElementById('result');
+
+        let bestScore, bestThreshold, originalImageData;
+
+        function initializeSegmentation() {
+            bestScore = Infinity;
+            bestThreshold = 100;
+            originalImageData = null;
+        }
+
+        initializeSegmentation();
+
+        imageInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            const reader = new FileReader();
+
+            reader.onload = function(event) {
+                const img = new Image();
+                img.onload = function() {
+                    originalCanvas.width = img.width;
+                    originalCanvas.height = img.height;
+                    const ctx = originalCanvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
+                    originalImageData = ctx.getImageData(0, 0, img.width, img.height);
+
+                    findBestThreshold(originalImageData);
+                };
+                img.src = event.target.result;
+            };
+
+            reader.readAsDataURL(file);
+        });
+
+        function findBestThreshold(imageData) {
+            initializeSegmentation();
+            originalImageData = imageData;
+
+            for (let threshold = 100; threshold <= 200; threshold += 10) {
+                worker.postMessage({ 
+                    imageData: imageData, 
+                    threshold: threshold, 
+                    evaluate: true 
+                }, [imageData.data.buffer.slice(0)]);
+            }
+        }
+
+        worker.onmessage = function(e) {
+            const { segmentedData, threshold, score } = e.data;
+
+            if (score !== undefined) {
+                if (score < bestScore) {
+                    bestScore = score;
+                    bestThreshold = threshold;
+                }
+
+                if (threshold === 200) {
+                    if (originalImageData) {
+                        worker.postMessage({ 
+                            imageData: originalImageData, 
+                            threshold: bestThreshold,
+                            evaluate: false
+                        }, [originalImageData.data.buffer.slice(0)]);
+                    } else {
+                        console.error('Original image data is not available');
+                    }
+                }
+            } else {
+                
+                segmentedCanvas.width = segmentedData.width;
+                segmentedCanvas.height = segmentedData.height;
+                const ctx = segmentedCanvas.getContext('2d');
+                ctx.putImageData(segmentedData, 0, 0);
+                resultDiv.textContent = `Best threshold: ${bestThreshold}`;
+            
+            }
+        };
+    </script>
+</body>
+</html>

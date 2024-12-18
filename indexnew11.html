@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Optimized Image Processing</title>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.4/dist/tesseract.min.js"></script>
+    <script  src = "effects.js"></script>
+<script src = "removewatermark.js"></script>
+<script src = "objremovelipsync.js"></script>
+
+    <style>
+        body {display: flex; margin: 0; padding: 0; height: 100vh; font-family: Arial, sans-serif;}
+        #sidebar {width: 300px; background-color: #f0f0f0; padding: 20px; overflow-y: auto; height: 100vh; box-sizing: border-box; box-shadow: 2px 0 5px rgba(0,0,0,0.1); min-width: 200px; max-width: 50%;}
+        #mainContent {flex-grow: 1; padding: 20px; overflow-y: auto;}
+        .controls {display: flex; flex-direction: column; gap: 1px; margin-bottom: 20px;}
+        .controls input, .controls button, .effect-button {width: 100%; padding: 10px; margin-bottom: 10px; border: none; border-radius: 5px; background-color: #ffffff; transition: all 0.3s ease;}
+        .controls button, .effect-button {cursor: pointer; text-align: center; font-weight: bold; color: #333;}
+        .controls button:hover, .effect-button:hover {background-color: #f5f5f5; box-shadow: 0 4px 8px rgba(0,0,0,0.15);}
+        #effectControls {display: flex; flex-direction: column; gap: 1px;}
+        .effect-button {opacity: 0.8;}
+        .effect-button.processed {opacity: 1; background-color: #e6f3ff;}
+        .effect-button.inactive {opacity: 0.5; background-color: #f0f0f0;}
+        #resultsContainer {display: flex; flex-wrap: wrap;}
+        .canvas-wrapper {display: inline-block; 
+            width: 100px;
+            height: 100px;
+            margin: 5px; 
+            text-align: center;}
+        #masterCheckboxControl {margin-bottom: 15px;}
+        .canvas-wrapper img{
+            width: 100px;
+            height: 100px;
+        }
+        input[type="file"], input[type="number"] {background-color: #ffffff; border: 1px solid #ddd;}
+        label {margin-bottom: 5px; font-weight: bold; color: #555;}
+        #imageCanvas { border: 1px solid black; }
+        #generatedImages img { max-width: 1000px; margin: 5px; }
+        #generatedImages {
+            display: grid;
+            gap: 20px;
+        }
+        .effect-container {
+            text-align: center;
+        }
+        .effect-container canvas {
+            max-width: 100%;
+            height: auto;
+        }
+        .gif-container {
+            margin-bottom: 20px;
+        }
+        .segmented-images {
+            display: flex;
+            flex-wrap: nowrap;
+            overflow-x: auto;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .segment-wrapper {
+            flex: 0 0 auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .segment-wrapper p {
+            margin: 5px 0;
+            font-size: 14px;
+        }
+        .segment-wrapper canvas {
+            border: 1px solid #ddd;
+        }
+        #imageContainer {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 20px;
+        }
+        .image-wrapper {
+            text-align: center;
+        }
+        .image-wrapper img {
+            max-width: 100%;
+            height: auto;
+        }
+    </style>
+</head>
+<body>
+    <div id="sidebar">
+        <div class="controls">
+            <input type="file" id="imageUpload" accept="image/*">
+            <label for="imageCount">Number of images per effect:</label>
+            <input type="number" id="imageCount" min="1" max="100" value="10">
+            <button id="processButton">Process Image</button>
+            <button id="fastProcessButton">Fast Process</button>
+            <div>
+                <label for="widthInput">Target Width:</label>
+                <input type="number" id="widthInput" min="1" step="1">
+            </div>
+            <div>
+                <label for="heightInput">Target Height:</label>
+                <input type="number" id="heightInput" min="1" step="1">
+            </div>
+            <button id="resizeButton">Resize Image</button>
+            <button id="toggleDraw">Toggle Draw Mode</button>
+            <button id="removeObject">Remove Object</button>
+            <button id="lipSyncButton">Lip Sync Animation</button> <!-- New button -->
+            <button id="generateImages">Generate Images</button> <!-- Brightness button -->
+            <button id="removeWatermarkButton">Remove Watermark</button>
+            <label for="brightness">Max Brightness Change:</label>
+            <input type="range" id="brightness" min="0" max="255" value="100">
+            <input type="number" id="value1" value="0">
+            <input type="number" id="value2" value="0">
+            <input type="number" id="value3" value="0">
+            <input type="number" id="value4" value="0">
+            <input type="number" id="value5" value="0">
+        </div>
+        <div id="masterCheckboxControl">
+            <input type="checkbox" id="masterCheckbox" checked>
+            <label for="masterCheckbox">Select/Unselect All</label>
+        </div>
+        <div id="effectControls"></div>
+    </div>
+    <div id="mainContent">
+        <div id="resultsContainer"></div>
+        <canvas id="imageCanvas"></canvas>
+        <div id="generatedImages"></div>
+        <div id="segmentsContainer"></div>
+        <div id="progress"></div> <!-- Added progress div -->
+        <div id="imageContainer">
+            <div class="image-wrapper">
+                <h3>Original Image</h3>
+                <img id="originalImage" alt="Original Image">
+            </div>
+            <div class="image-wrapper">
+                <h3>Segmented Image</h3>
+                <img id="segmentedImage" alt="Segmented Image">
+            </div>
+        </div>
+    </div>
+
+    <script>
+
+
+
+        let originalImageData;
+        let maskData; 
+        
+        let size;
+        
+        let objectMask;
+        
+        let lines = [];
+        
+        // const imageUpload = document.getElementById('imageUpload');
+        // const resultsContainer = document.getElementById('resultsContainer');
+        // const effectControls = document.getElementById('effectControls');
+        // const imageCountInput = document.getElementById('imageCount');
+        // const processButton = document.getElementById('processButton');
+        // const masterCheckbox = document.getElementById('masterCheckbox');
+        // const fastProcessButton = document.getElementById('fastProcessButton');
+        // const resizeButton = document.getElementById('resizeButton');
+        // const toggleDrawButton = document.getElementById('toggleDraw');
+        // const removeObjectButton = document.getElementById('removeObject');
+        // const widthInput = document.getElementById('widthInput');
+        // const heightInput = document.getElementById('heightInput');
+        // const imageCanvas = document.getElementById('imageCanvas');
+        // const ctx = imageCanvas.getContext('2d');
+        // const progressDiv = document.getElementById('progress'); // Initialize progressDiv
+        // const lipSyncButton = document.getElementById('lipSyncButton'); // New button
+        // const generateImagesButton = document.getElementById('generateImages'); // Brightness button
+        // const removeWatermarkButton = document.getElementById('removeWatermarkButton');
+        // removeWatermarkButton.addEventListener('click', removeWatermark);
+
+        // const workers = {};
+        // effects.forEach(effect => { workers[effect] = new Worker(`js/${effect}Worker.js`); });
+        // console.log(effects);
+        // let processedImages = {};
+        // let originalImage;
+        // let selectedRegions = [];
+        // let tolerance = 32;
+        // let magicWandMode = 'add';
+        // let clickedPoints = [];
+        // let drawMode = false;
+        // let isDrawing = false;
+        // let worker = null;
+
+        // processButton.addEventListener('click', () => processImageWithMethod(processImage));
+        // fastProcessButton.addEventListener('click', () => processImageWithMethod(fastProcessImage));
+        // masterCheckbox.addEventListener('change', toggleAllEffects);
+        // resizeButton.addEventListener('click', startResizing);
+        // toggleDrawButton.addEventListener('click', toggleDrawMode);
+        // removeObjectButton.addEventListener('click', performObjectRemoval);
+        // imageCanvas.addEventListener('click', handleCanvasClick);
+        // imageCanvas.addEventListener('mousedown', startDrawing);
+        // imageCanvas.addEventListener('mousemove', draw);
+        // imageCanvas.addEventListener('mouseup', stopDrawing);
+        // lipSyncButton.addEventListener('click', startLipSyncAnimation); // New button event listener
+        // generateImagesButton.addEventListener('click', generateBrightnessVariations); // Brightness button event listener
+
+        const animationControlDiv = document.createElement('div');
+        animationControlDiv.className = 'effect-control';
+        const animationCheckbox = document.createElement('input');
+        animationCheckbox.type = 'checkbox';
+        animationCheckbox.id = 'animationCheckbox';
+        animationCheckbox.addEventListener('change', toggleAnimationEffects);
+        const animationLabel = document.createElement('label');
+        animationLabel.htmlFor = 'animationCheckbox';
+        animationLabel.textContent = 'Animation';
+        animationControlDiv.appendChild(animationCheckbox);
+        animationControlDiv.appendChild(animationLabel);
+        effectControls.appendChild(animationControlDiv);
+        effects.forEach(effect => {
+            const controlDiv = document.createElement('div');
+            controlDiv.className = 'effect-control';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.id = `${effect}Checkbox`;
+            checkbox.checked = true;
+            checkbox.addEventListener('change', updateMasterCheckbox);
+            const label = document.createElement('label');
+            label.htmlFor = `${effect}Checkbox`;
+            label.textContent = effect;
+            controlDiv.appendChild(checkbox);
+            controlDiv.appendChild(label);
+            effectControls.appendChild(controlDiv);
+        });
+
+        imageUpload.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    originalImage = new Image();
+                    originalImage.onload = () => {
+                        imageCanvas.width = originalImage.width;
+                        imageCanvas.height = originalImage.height;
+                        ctx.drawImage(originalImage, 0, 0);
+                        originalImageData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height);
+                        maskData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height); // Initialize maskData
+                        size = { w: imageCanvas.width, h: imageCanvas.height }; // Initialize size
+                        objectMask = matrix(imageCanvas.width, imageCanvas.height, false); // Initialize objectMask
+                        console.log('Image loaded and originalImageData set.');
+                    };
+                    originalImage.onerror = (error) => {
+                        console.error('Error loading image:', error);
+                        alert('Failed to load the image. Please try again.');
+                    };
+                    originalImage.src = e.target.result; // Load the image into the canvas
+                };
+                reader.onerror = (error) => {
+                    console.error('Error reading file:', error);
+                    alert('Failed to read the file. Please try again.');
+                };
+                reader.readAsDataURL(file); // Read the file as a data URL
+            }
+        });
+
+        function loadImage() {
+            originalImage = new Image();
+            originalImage.onload = function() {
+                imageCanvas.width = originalImage.width;
+                imageCanvas.height = originalImage.height;
+                ctx.drawImage(originalImage, 0, 0);
+                originalImageData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height);
+                maskData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height); // Initialize maskData
+                size = { w: imageCanvas.width, h: imageCanvas.height }; // Initialize size
+                objectMask = matrix(imageCanvas.width, imageCanvas.height, false); // Initialize objectMask
+                window.uploadedImageData = originalImageData;
+                displaySelectedRegionsBorders();
+            }
+            originalImage.src = 'face.jpg'; // Ensure this path is correct
+        }
+
+        function handleCanvasClick(event) {
+            const rect = imageCanvas.getBoundingClientRect();
+            const x = Math.floor((event.clientX - rect.left) / (rect.width / imageCanvas.width));
+            const y = Math.floor((event.clientY - rect.top) / (rect.height / imageCanvas.height));
+            performMagicWandSelection(x, y);
+        }
+
+        function performMagicWandSelection(startX, startY) {
+            const imageData = ctx.getImageData(0, 0, imageCanvas.width, imageCanvas.height);
+            const worker = new Worker('magicWand1Worker.js');
+            worker.postMessage({
+                imageData: imageData,
+                startX: startX,
+                startY: startY,
+                tolerance: tolerance,
+                mode: magicWandMode
+            });
+            worker.onmessage = function(e) {
+                let newRegion = e.data.selectedRegion;
+                console.log(newRegion);
+                updateSelectedRegions(newRegion);
+                updateObjectMask(newRegion); // Update object mask with new region
+                displaySelectedRegionsBorders();
+            };
+        }
+
+        function updateSelectedRegions(newRegion) {
+            if (magicWandMode === 'add') {
+                selectedRegions.push(newRegion);
+            } else if (magicWandMode === 'subtract') {
+                selectedRegions = selectedRegions.map(region => 
+                    region.filter(pixel => !newRegion.includes(pixel))
+                );
+            } else if (magicWandMode === 'invert') {
+                selectedRegions = selectedRegions.map(region => {
+                    let invertedRegion = region.filter(pixel => !newRegion.includes(pixel))
+                        .concat(newRegion.filter(pixel => !region.includes(pixel)));
+                    return invertedRegion;
+                });
+            }
+        }
+
+        function updateObjectMask(newRegion) {
+            if (!objectMask) {
+                objectMask = matrix(imageCanvas.width, imageCanvas.height, false);
+            }
+            newRegion.forEach(pixelIndex => {
+                const x = pixelIndex % imageCanvas.width;
+                const y = Math.floor(pixelIndex / imageCanvas.width);
+                objectMask[y][x] = true;
+            });
+        }
+
+        function displaySelectedRegionsBorders() {
+            ctx.clearRect(0, 0, imageCanvas.width, imageCanvas.height);
+            ctx.drawImage(originalImage, 0, 0);
+            ctx.strokeStyle = 'red';
+            ctx.lineWidth = 1;
+            selectedRegions.forEach(region => {
+                ctx.beginPath();
+                region.forEach(pixelIndex => {
+                    const x = pixelIndex % imageCanvas.width;
+                    const y = Math.floor(pixelIndex / imageCanvas.width);
+                    ctx.rect(x, y, 1, 1);
+                });
+                ctx.stroke();
+            });
+        }
+
+        function startResizing() {
+            if (!originalImage || !originalImage.complete || !originalImage.naturalWidth) {
+                alert('Image not loaded.');
+                return;
+            }
+
+            if (!originalImageData) {
+                alert('No image data available.');
+                return;
+            }
+
+            const toWidth = parseInt(widthInput.value);
+            const toHeight = parseInt(heightInput.value);
+
+            if (isNaN(toWidth) || isNaN(toHeight)) {
+                alert('Please enter valid width and height values.');
+                return;
+            }
+
+            if (toWidth >= originalImage.width && toHeight >= originalImage.height) {
+                alert('Please enter at least one dimension smaller than the original image.');
+                return;
+            }
+
+            const resizedImageData = new ImageData(
+                new Uint8ClampedArray(originalImageData.data),
+                originalImageData.width,
+                originalImageData.height
+            );
+
+            resizeImage(
+                resizedImageData,
+                toWidth,
+                toHeight,
+                ({ step, steps }) => {
+                    progressDiv.textContent = `Resizing... ${Math.round((step / steps) * 100)}%`;
+                }
+            ).then(() => {
+                imageCanvas.width = toWidth;
+                imageCanvas.height = toHeight;
+                ctx.putImageData(resizedImageData, 0, 0);
+                progressDiv.textContent = 'Resizing complete!';
+            });
+        }
+
+        function toggleDrawMode() {
+            drawMode = !drawMode;
+            toggleDrawButton.textContent = drawMode ? 'Disable Draw' : 'Enable Draw';
+        }
+
+        function startDrawing(e) {
+            if (!drawMode) return;
+            isDrawing = true;
+            draw(e);
+        }
+
+        function draw(e) {
+            if (!isDrawing || !drawMode) return;
+            const rect = imageCanvas.getBoundingClientRect();
+            const x = Math.floor(e.clientX - rect.left);
+            const y = Math.floor(e.clientY - rect.top);
+
+            ctx.fillStyle = 'rgba(255, 0, 0, 0.5)';
+            ctx.beginPath();
+            ctx.arc(x, y, 5, 0, Math.PI * 2);
+            ctx.fill();
+
+            if (objectMask) {
+                for (let i = -5; i <= 5; i++) {
+                    for (let j = -5; j <= 5; j++) {
+                        if (x + i >= 0 && x + i < imageCanvas.width && y + j >= 0 && y + j < imageCanvas.height) {
+                            objectMask[y + j][x + i] = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        function stopDrawing() {
+            isDrawing = false;
+        }
+
+        </script>
+</body>
+</html>

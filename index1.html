@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Optimized Image Processing</title>
+    <style>
+        body {display: flex; margin: 0; padding: 0; height: 100vh; font-family: Arial, sans-serif;}
+        #sidebar {width: 300px;  padding: 20px; overflow-y: auto; height: 100vh; box-sizing: border-box; box-shadow: 2px 0 5px rgba(0,0,0,0.1); min-width: 200px; max-width: 50%;}
+        #mainContent {flex-grow: 1; padding: 20px; overflow-y: auto;}
+        .controls {display: flex; flex-direction: column; gap: 1px; margin-bottom: 20px;}
+        .controls input, .controls button, .effect-button {width: 100%; padding: 10px; margin-bottom: 10px; border: none; border-radius: 5px; background-color: #ffffff; transition: all 0.3s ease;}
+        .controls button, .effect-button {cursor: pointer; text-align: center; font-weight: bold; color: #333;}
+        .controls button:hover, .effect-button:hover { box-shadow: 0 4px 8px rgba(0,0,0,0.15);}
+        #effectControls {display: flex; flex-direction: column; gap: 1px;}
+        .effect-button {opacity: 0.8;}
+        .effect-button.processed {opacity: 1; background-color: #e6f3ff;}
+        .effect-button.inactive {opacity: 0.5; background-color: #f0f0f0;}
+        #resultsContainer {display: flex; flex-wrap: wrap;}
+        .canvas-wrapper {display: inline-block; 
+            width: 100px;
+            height: 100px;
+            margin: 5px; 
+            text-align: center;}
+        #masterCheckboxControl {margin-bottom: 15px;}
+        .canvas-wrapper img{
+    
+            width: 100px;
+            height: 100px;
+        
+        }
+        input[type="file"], input[type="number"] { border: 1px solid #ddd;}
+        label {margin-bottom: 5px; font-weight: bold; color: #555;}
+    </style>
+</head>
+<body>
+    <div id="sidebar">
+        <div class="controls">
+            <input type="file" id="imageUpload" accept="image/*">
+            <label for="imageCount">Number of images per effect:</label>
+            <input type="number" id="imageCount" min="1" max="100" value="10">
+            <button id="processButton">Process Image</button>
+            <button id="fastProcessButton">Fast Process</button>
+        </div>
+        <div id="masterCheckboxControl">
+            <input type="checkbox" id="masterCheckbox" checked>
+            <label for="masterCheckbox">Select/Unselect All</label>
+        </div>
+        <div id="effectControls"></div>
+    </div>
+    <div id="mainContent">
+        <div id="resultsContainer"></div>
+    </div>
+
+    <script>
+        const imageUpload = document.getElementById('imageUpload');
+        const resultsContainer = document.getElementById('resultsContainer');
+        const effectControls = document.getElementById('effectControls');
+        const imageCountInput = document.getElementById('imageCount');
+        const processButton = document.getElementById('processButton');
+        const masterCheckbox = document.getElementById('masterCheckbox');
+        const fastProcessButton = document.getElementById('fastProcessButton');
+
+        const effects = ['brightness', 'hue', 'saturation', 'vintage', 'ink', 'vibrance', 'denoise', 'hexagonalPixelate', 'invert', 'bulgePinch', 'swirl', 'lensBlur', 'tiltShiftBlur', 'triangularBlur', 'zoomBlur', 'edgeWork', 'dotScreen', 'colorHalftone',
+        'perspectiveTilt', 'perspectiveSqueeze', 'perspectiveCurve', 'perspectiveTwist', 
+        'perspectiveFisheye', 'perspective', 'perspectiveRotate', 'perspectiveSkew',
+        'perspectiveWarp', 'perspectiveZoom', 'perspectiveTunnel', 'perspectiveSphere', 
+        'perspectiveCylinder', 'perspectiveRipple', 'perspectiveVortex', 'perspectiveFold',
+        'perspectivePixelate', 'perspectiveEmboss', 'perspectiveMosaic',
+        'perspectiveOilPainting', 'perspectivePosterize'];
+           
+     const animationEffects = [
+    'perspectiveTilt', 'perspectiveSqueeze', 'perspectiveCurve', 'perspectiveTwist',
+    'perspectiveFisheye', 'perspective', 'perspectiveRotate', 'perspectiveSkew',
+    'perspectiveWarp', 'perspectiveZoom', 'perspectiveTunnel', 'perspectiveSphere',
+    'perspectiveCylinder', 'perspectiveRipple', 'perspectiveVortex', 'perspectiveFold',
+    'perspectivePixelate', 'perspectiveEmboss', 'perspectiveMosaic',
+    'perspectiveOilPainting', 'perspectivePosterize'
+    ];
+
+        const workers = {};
+        effects.forEach(effect => { workers[effect] = new Worker(`js/${effect}Worker.js`); });
+
+        let processedImages = {};
+
+        processButton.addEventListener('click', () => processImageWithMethod(processImage));
+        fastProcessButton.addEventListener('click', () => processImageWithMethod(fastProcessImage));
+        masterCheckbox.addEventListener('change', toggleAllEffects);
+        const animationControlDiv = document.createElement('div');
+        animationControlDiv.className = 'effect-control';
+        const animationCheckbox = document.createElement('input');
+        animationCheckbox.type = 'checkbox';
+        animationCheckbox.id = 'animationCheckbox';
+        animationCheckbox.addEventListener('change', toggleAnimationEffects);
+        const animationLabel = document.createElement('label');
+        animationLabel.htmlFor = 'animationCheckbox';
+        animationLabel.textContent = 'Animation';
+        animationControlDiv.appendChild(animationCheckbox);
+        animationControlDiv.appendChild(animationLabel);
+        effectControls.appendChild(animationControlDiv);
+        effects.forEach(effect => {
+            const controlDiv = document.createElement('div');
+            controlDiv.className = 'effect-control';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.id = `${effect}Checkbox`;
+
+            
+            checkbox.checked = true;
+            checkbox.addEventListener('change', updateMasterCheckbox);
+            const label = document.createElement('label');
+            label.htmlFor = `${effect}Checkbox`;
+            label.textContent = effect;
+            controlDiv.appendChild(checkbox);
+            controlDiv.appendChild(label);
+
+
+
+
+
+            effectControls.appendChild(controlDiv);
+        });
+        
+        
+        function toggleAnimationEffects() {
+            const isChecked = document.getElementById('animationCheckbox').checked;
+            animationEffects.forEach(effect => {
+                const checkbox = document.getElementById(effect + 'Checkbox');
+                if (checkbox) {
+                    checkbox.checked = isChecked;
+                }
+            });
+            updateMasterCheckbox();
+        }
+
+        function toggleAllEffects() {
+    const isChecked = masterCheckbox.checked;
+    effects.forEach(effect => {
+        if (!animationEffects.includes(effect)) {
+            document.getElementById(effect + 'Checkbox').checked = isChecked;
+        }
+    });
+}
+
+        function updateMasterCheckbox() {
+    const effectCheckboxes = effects.filter(effect => !animationEffects.includes(effect));
+    const allChecked = effectCheckboxes.every(effect => document.getElementById(effect + 'Checkbox').checked);
+    const anyChecked = effectCheckboxes.some(effect => document.getElementById(effect + 'Checkbox').checked);
+    masterCheckbox.checked = allChecked;
+    masterCheckbox.indeterminate = anyChecked && !allChecked;
+}
+
+        function updateEffectDisplay(effect) {
+            const effectButton = document.querySelector(`.effect-button[data-effect="${effect}"]`);
+            if (effectButton) effectButton.classList.add('processed');
+        }
+
+        async function fastProcessImage(img) {
+            processedImages = {};
+            const imageCount = parseInt(imageCountInput.value);
+            displayEffectButtons();
+            const effectPromises = effects.filter(effect => document.getElementById(`${effect}Checkbox`).checked).map(async (effect) => {
+                processedImages[effect] = [];
+                for (let i = 0; i < imageCount; i++) {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
+                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    let value = getEffectValue(effect, i, imageCount);
+                    try {
+                        const processedImageData = await applyEffect(effect, imageData, value);
+                        ctx.putImageData(processedImageData, 0, 0);
+                        processedImages[effect].push({ value: value, dataUrl: canvas.toDataURL() });
+                        updateEffectDisplay(effect);
+                    } catch (error) {
+                        console.error(`Error processing effect ${effect} for image ${i+1}:`, error.message);
+                    }
+                }
+            });
+            await Promise.all(effectPromises);
+            displayProcessedImages();
+        }
+        imageUpload.addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const objectUrl = URL.createObjectURL(file);
+                const img = new Image();
+                uploadedImageContainer = document.getElementById('resultsContainer')
+                img.onload = function() {
+                    // Display the image in the container
+                    uploadedImageContainer.innerHTML = ''; // Clear any previous image
+                    uploadedImageContainer.appendChild(img);
+                    img.style.maxWidth = "100%"; // Ensure the image fits well
+                };
+                img.src = objectUrl;
+            }
+        });
+
+        // function processImageWithMethod(processingMethod) {
+        //     const file = imageUpload.files[0];
+        //     if (file) {
+        //         const objectUrl = URL.createObjectURL(file);
+        //         const img = new Image();
+        //         img.onload = function() {
+        //             console.log('Image loaded successfully');
+        //             URL.revokeObjectURL(objectUrl);
+        //             processingMethod(img);
+        //         }
+        //         img.src = objectUrl;
+        //         img.crossOrigin = "Anonymous";
+
+        //     } else {
+        //         alert('Please select an image first.');
+        //     }
+        // }
+
+        // async function processImage(img) {
+        //     processedImages = {};
+        //     const imageCount = parseInt(imageCountInput.value);
+        //     displayEffectButtons();
+        //     for (const effect of effects.filter(effect => document.getElementById(`${effect}Checkbox`).checked)) {
+        //         processedImages[effect] = [];
+        //         for (let i = 0; i < imageCount; i++) {
+        //             const canvas = document.createElement('canvas');
+        //             canvas.width = img.width;
+        //             canvas.height = img.height;
+        //             const ctx = canvas.getContext('2d');
+        //             ctx.drawImage(img, 0, 0);
+        //             const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        //             let value = getEffectValue(effect, i, imageCount);
+        //             try {
+        //                 const processedImageData = await applyEffect(effect, imageData, value);
+        //                 ctx.putImageData(processedImageData, 0, 0);
+        //                 processedImages[effect].push({ value: value, dataUrl: canvas.toDataURL() });
+        //                 updateEffectDisplay(effect);
+        //             } catch (error) {
+        //                 console.error(`Error processing effect ${effect} for image ${i+1}:`, error);
+        //             }
+        //         }
+        //     }
+        // }
+
+        function processImageWithMethod(processingMethod) {
+            const file = imageUpload.files[0];
+            if (file) {
+                const objectUrl = URL.createObjectURL(file);
+                const img = new Image();
+                img.onload = function() {
+                    console.log('Image loaded successfully');
+                    URL.revokeObjectURL(objectUrl);
+                    processingMethod(img);
+                };
+                img.src = objectUrl;
+            } else {
+                alert('Please select an image first.');
+            }
+        }
+
+
+        async function processImage(img) {
+    console.log('Processing image...');
+    processedImages = {};
+    const imageCount = parseInt(imageCountInput.value);
+    displayEffectButtons();
+    for (const effect of effects.filter(effect => document.getElementById(`${effect}Checkbox`).checked)) {
+        processedImages[effect] = [];
+        for (let i = 0; i < imageCount; i++) {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            let value = getEffectValue(effect, i, imageCount);
+            try {
+                const processedImageData = await applyEffect(effect, imageData, value);
+                ctx.putImageData(processedImageData, 0, 0);
+                processedImages[effect].push({ value: value, dataUrl: canvas.toDataURL() });
+                updateEffectDisplay(effect);
+            } catch (error) {
+                console.error(`Error processing effect ${effect} for image ${i+1}:`, error);
+            }
+        }
+    }
+}
+
+function displayProcessedImages() {
+    console.log('Displaying processed images...');
+    resultsContainer.innerHTML = '';
+    for (const effect in processedImages) {
+        if (document.getElementById(`${effect}Checkbox`).checked) {
+            const images = processedImages[effect];
+            if (images && images.length > 0) {
+                const effectDiv = document.createElement('div');
+                effectDiv.className = 'effect-results';
+                const effectTitle = document.createElement('h3');
+                effectTitle.textContent = effect;
+                effectDiv.appendChild(effectTitle);
+                images.forEach((imgData) => {
+                    const wrapper = document.createElement('div');
+                    wrapper.className = 'canvas-wrapper';
+                    const img = new Image();
+                    img.src = imgData.dataUrl;
+                    img.crossOrigin = "Anonymous";
+
+                    wrapper.appendChild(img);
+                    effectDiv.appendChild(wrapper);
+                });
+                resultsContainer.appendChild(effectDiv);
+            }
+        }
+    }
+}
+
+        // function applyEffect(effect, imageData, value) {
+        //     return new Promise((resolve, reject) => {
+        //         if (!workers[effect]) {
+        //             reject(new Error(`Worker for effect ${effect} not found`));
+        //             return;
+        //         }
+        //         workers[effect].onmessage = function(e) {
+        //             if (e.data.error) {
+        //                 reject(new Error(`Error in ${effect} worker: ${e.data.error}`));
+        //             } else {
+        //                 resolve(e.data.imageData);
+        //             }
+        //         };
+        //         workers[effect].onerror = function(error) {
+        //             reject(new Error(`Error in ${effect} worker: ${error.message}`));
+        //         };
+        //         workers[effect].postMessage({ imageData: imageData, value: value });
+        //     });
+        // }
+
+        function applyEffect(effect, imageData, value) {
+    return new Promise((resolve, reject) => {
+        if (!workers[effect]) {
+            reject(new Error(`Worker for effect ${effect} not found`));
+            return;
+        }
+        workers[effect].onmessage = function(e) {
+            if (e.data.error) {
+                reject(new Error(`Error in ${effect} worker: ${e.data.error}`));
+            } else {
+                resolve(e.data.imageData);
+            }
+        };
+        workers[effect].onerror = function(error) {
+            reject(new Error(`Error in ${effect} worker: ${error.message}`));
+        };
+        workers[effect].postMessage({ imageData: imageData, value: value });
+    });
+}
+
+        function displayEffectButtons() {
+    // Clear only the buttons, not the checkboxes
+    Array.from(effectControls.children).forEach(child => {
+        if (child.tagName !== 'DIV') { // Assuming checkboxes are in div containers
+            child.remove();
+        }
+    });
+
+    effects.forEach(effect => {
+        const button = document.createElement('button');
+        button.className = 'effect-button';
+        button.textContent = effect;
+        button.dataset.effect = effect;
+        button.dataset.active = 'true';
+        button.addEventListener('mouseenter', () => displayEffectImages(effect));
+        button.addEventListener('click', () => { toggleEffect(button); displayEffectImages(effect); });
+        
+        // Insert the button after its corresponding checkbox div
+        const checkboxDiv = document.querySelector(`.effect-control input[id="${effect}Checkbox"]`).closest('.effect-control');
+        checkboxDiv.insertAdjacentElement('afterend', button);
+    });
+}
+   
+        function toggleEffect(button) {
+            button.dataset.active = button.dataset.active === 'true' ? 'false' : 'true';
+            button.classList.toggle('inactive');
+        }
+
+        function displayEffectImages(effect) {
+            resultsContainer.innerHTML = '';
+            if (document.getElementById(`${effect}Checkbox`).checked) {
+                const images = processedImages[effect];
+                if (images && images.length > 0) {
+                    images.forEach((imgData) => {
+                        const wrapper = document.createElement('div');
+                        wrapper.className = 'canvas-wrapper';
+                        const img = new Image();
+                        img.src = imgData.dataUrl;
+                        img.crossOrigin = "Anonymous";
+
+                        wrapper.appendChild(img);
+                        resultsContainer.appendChild(wrapper);
+                    });
+                } else {
+                    resultsContainer.textContent = 'Processing...';
+                }
+            } else {
+                resultsContainer.textContent = 'Effect not selected';
+            }
+        }
+
+        function getEffectValue(effect, index, count) {
+            const t = index / (count - 1);
+            switch(effect) {
+                case 'brightness': return Math.floor(t * 510) - 255;
+                case 'hue': return Math.floor(t * 360);
+                case 'saturation': return t * 2;
+                case 'vintage': case 'ink': case 'vibrance': case 'denoise': case 'hexagonalPixelate': case 'invert':
+                case 'perspectiveTilt': case 'perspectiveSqueeze': case 'perspectiveCurve': case 'perspectiveFisheye':
+                case 'perspectiveRotate': case 'perspectiveSkew': case 'perspectiveWarp': case 'perspectiveZoom':
+                case 'perspectiveTunnel': case 'perspectiveSphere': case 'perspectiveCylinder': case 'perspectiveRipple':
+                case 'perspectiveVortex': case 'perspectiveFold': case 'perspectivePixelate': case 'perspectiveEmboss':
+                case 'perspectiveMosaic': case 'perspectiveOilPainting': case 'perspectivePosterize':
+                    return t;
+                case 'bulgePinch': return [t, t * 2 - 1];
+                case 'swirl': return (t - 0.5) * 10;
+                case 'lensBlur': case 'triangularBlur': return t * 50;
+                case 'tiltShiftBlur': case 'zoomBlur': return [t, 1-t];
+                case 'edgeWork': return t * 10 + 1;
+                case 'dotScreen': case 'colorHalftone': return t * 10;
+                case 'perspectiveTwist': return t * Math.PI * 2;
+                case 'perspective': return [t, 1-t, t, 1-t];
+                default: return t;
+            }
+        }
+    
+    
+    </script>
+</body>
+</html>

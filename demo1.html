@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Seam Carving Object Removal</title>
+    <style>
+        canvas { border: 1px solid black; }
+    </style>
+</head>
+<body>
+    <input type="file" id="imageUpload">
+    <canvas id="canvas"></canvas>
+    <button id="removeObject">Remove Object</button>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const imageUpload = document.getElementById('imageUpload');
+        const removeButton = document.getElementById('removeObject');
+
+        let imageData, objectMask;
+
+        // Utility functions
+        const getPixel = (data, x, y) => {
+            const index = (y * data.width + x) * 4;
+            return [
+                data.data[index],
+                data.data[index + 1],
+                data.data[index + 2],
+                data.data[index + 3]
+            ];
+        };
+
+        const setPixel = (data, x, y, color) => {
+            const index = (y * data.width + x) * 4;
+            data.data[index] = color[0];
+            data.data[index + 1] = color[1];
+            data.data[index + 2] = color[2];
+            data.data[index + 3] = color[3];
+        };
+
+        // Core seam carving logic
+        function removeSeam(imageData, objectMask) {
+            const width = imageData.width;
+            const height = imageData.height;
+
+            // Find lowest energy seam
+            const findSeam = () => {
+                const energyMap = new Array(height).fill(null).map(() => new Array(width).fill(0));
+                
+                // Calculate energy
+                for (let y = 0; y < height; y++) {
+                    for (let x = 0; x < width; x++) {
+                        if (objectMask[y][x]) {
+                            energyMap[y][x] = -1000; // Mark object pixels
+                        } else {
+                            const left = x > 0 ? getPixel(imageData, x-1, y) : null;
+                            const right = x < width-1 ? getPixel(imageData, x+1, y) : null;
+                            const current = getPixel(imageData, x, y);
+                            
+                            let energy = 0;
+                            if (left) energy += Math.abs(left[0] - current[0]);
+                            if (right) energy += Math.abs(right[0] - current[0]);
+                            energyMap[y][x] = energy;
+                        }
+                    }
+                }
+
+                // Find minimum energy path
+                const seam = [];
+                let minEnergy = Infinity;
+                let startX = 0;
+
+                // Find minimum energy pixel in last row
+                for (let x = 0; x < width; x++) {
+                    if (energyMap[height-1][x] < minEnergy) {
+                        minEnergy = energyMap[height-1][x];
+                        startX = x;
+                    }
+                }
+
+                // Trace back the seam
+                let currentX = startX;
+                for (let y = height - 1; y >= 0; y--) {
+                    seam.push({x: currentX, y});
+                    
+                    // Find minimum adjacent pixel in previous row
+                    if (y > 0) {
+                        let minX = currentX;
+                        let minVal = Infinity;
+                        
+                        for (let dx = -1; dx <= 1; dx++) {
+                            const newX = currentX + dx;
+                            if (newX >= 0 && newX < width) {
+                                if (energyMap[y-1][newX] < minVal) {
+                                    minVal = energyMap[y-1][newX];
+                                    minX = newX;
+                                }
+                            }
+                        }
+                        currentX = minX;
+                    }
+                }
+
+                return seam;
+            };
+
+            // Remove seam by shifting pixels
+            const removeSeamFromImage = (seam) => {
+                seam.forEach(({x, y}) => {
+                    for (let cx = x; cx < width - 1; cx++) {
+                        const nextPixel = getPixel(imageData, cx + 1, y);
+                        setPixel(imageData, cx, y, nextPixel);
+                    }
+                });
+                return imageData;
+            };
+
+            // Remove object
+            const seam = findSeam();
+            return removeSeamFromImage(seam);
+        }
+
+        // Image upload
+        imageUpload.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            const reader = new FileReader();
+            
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onload = () => {
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    ctx.drawImage(img, 0, 0);
+                    
+                    // Create object mask
+                    imageData = ctx.getImageData(0, 0, img.width, img.height);
+                    objectMask = new Array(img.height).fill(null).map(() => 
+                        new Array(img.width).fill(false)
+                    );
+                    
+                    // Simple object mask (middle of image)
+                    const midX = Math.floor(img.width / 2);
+                    const midY = Math.floor(img.height / 2);
+                    for (let y = midY - 50; y < midY + 50; y++) {
+                        for (let x = midX - 50; x < midX + 50; x++) {
+                            objectMask[y][x] = true;
+                        }
+                    }
+                };
+                img.src = event.target.result;
+            };
+            
+            reader.readAsDataURL(file);
+        });
+
+        // Remove object
+        removeButton.addEventListener('click', () => {
+            if (imageData && objectMask) {
+                const newImageData = removeSeam(imageData, objectMask);
+                ctx.putImageData(newImageData, 0, 0);
+            }
+        });
+    </script>
+</body>
+</html>

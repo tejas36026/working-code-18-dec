@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>  
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Image Enhancement</title>
+    <style>    
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            text-align: center;
+        }
+        .image-container {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 20px;
+        }
+        .image-wrapper {
+            width: 45%;
+        }
+        #inputImage, #outputImage {
+            max-width: 100%;
+            height: auto;
+            border: 1px solid #ddd;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+    </style>
+</head> 
+<body>  
+    <h1>Simple Image Enhancement</h1>
+    
+    <div class="controls">
+        <input type="file" id="imageInput" accept="image/*">
+        <div>
+            <label>Enhancement Type:</label>
+            <select id="enhancementType">
+                <option value="brightness">Brightness</option>
+                <option value="contrast">Contrast</option>
+                <option value="sharpen">Sharpen</option>
+                <option value="grayscale">Grayscale</option>
+            </select>
+            <input type="range" id="intensitySlider" min="0" max="200" value="100">
+            <button onclick="enhanceImage()">Enhance</button>
+        </div>
+    </div>
+
+    <div class="image-container">
+        <div class="image-wrapper">
+            <h2>Original Image</h2>
+            <img id="inputImage" alt="Input Image">
+        </div>
+        <div class="image-wrapper">
+            <h2>Enhanced Image</h2>
+            <img id="outputImage" alt="Enhanced Image">
+        </div>
+    </div>
+
+    <script>
+        function enhanceImage() {
+            const inputImage = document.getElementById('inputImage');
+            const outputImage = document.getElementById('outputImage');
+            const enhancementType = document.getElementById('enhancementType').value;
+            const intensity = document.getElementById('intensitySlider').value / 100;
+
+            // Create canvas for processing
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Set canvas size to match input image
+            canvas.width = inputImage.naturalWidth;
+            canvas.height = inputImage.naturalHeight;
+            
+            // Draw input image to canvas
+            ctx.drawImage(inputImage, 0, 0);
+            
+            // Get image data
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+
+            // Enhancement functions
+            function adjustBrightness(data, intensity) {
+                for (let i = 0; i < data.length; i += 4) {
+                    data[i] = Math.min(255, data[i] * intensity);     // R
+                    data[i + 1] = Math.min(255, data[i + 1] * intensity);   // G
+                    data[i + 2] = Math.min(255, data[i + 2] * intensity);   // B
+                }
+                return data;
+            }
+
+            function adjustContrast(data, intensity) {
+                const factor = (259 * (intensity + 255)) / (255 * (259 - intensity));
+                for (let i = 0; i < data.length; i += 4) {
+                    data[i] = factor * (data[i] - 128) + 128;     // R
+                    data[i + 1] = factor * (data[i + 1] - 128) + 128;   // G
+                    data[i + 2] = factor * (data[i + 2] - 128) + 128;   // B
+                }
+                return data;
+            }
+
+            function sharpenImage(data, width, height, intensity) {
+                const newData = new Uint8ClampedArray(data);
+                for (let y = 1; y < height - 1; y++) {
+                    for (let x = 1; x < width - 1; x++) {
+                        const idx = (y * width + x) * 4;
+                        for (let channel = 0; channel < 3; channel++) {
+                            const original = data[idx + channel];
+                            const sharpenedValue = original + intensity * (
+                                -data[(idx - width * 4) + channel] - 
+                                data[(idx - 4) + channel] - 
+                                data[(idx + 4) + channel] - 
+                                data[(idx + width * 4) + channel] + 
+                                5 * original
+                            );
+                            newData[idx + channel] = Math.min(255, Math.max(0, sharpenedValue));
+                        }
+                    }
+                }
+                return newData;
+            }
+
+            function convertToGrayscale(data) {
+                for (let i = 0; i < data.length; i += 4) {
+                    const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                    data[i] = avg;     // R
+                    data[i + 1] = avg; // G
+                    data[i + 2] = avg; // B
+                }
+                return data;
+            }
+
+            // Apply selected enhancement
+            switch (enhancementType) {
+                case 'brightness':
+                    adjustBrightness(data, intensity);
+                    break;
+                case 'contrast':
+                    adjustContrast(data, intensity);
+                    break;
+                case 'sharpen':
+                    const sharpened = sharpenImage(data, canvas.width, canvas.height, intensity);
+                    imageData.data.set(sharpened);
+                    break;
+                case 'grayscale':
+                    convertToGrayscale(data);
+                    break;
+            }
+
+            // Put modified image data back to canvas
+            ctx.putImageData(imageData, 0, 0);
+            
+            // Set output image source
+            outputImage.src = canvas.toDataURL();
+        }
+
+        // Enable enhancement when an image is selected
+        document.getElementById('imageInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            const reader = new FileReader();
+            
+            reader.onload = function(event) {
+                const inputImage = document.getElementById('inputImage');
+                inputImage.onload = function() {
+                    document.querySelector('button').disabled = false;
+                };
+                inputImage.src = event.target.result;
+            };
+            
+            reader.readAsDataURL(file);
+        });
+    </script>
+</body> 
+</html>
