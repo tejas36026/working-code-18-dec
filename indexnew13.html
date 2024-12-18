@@ -17,7 +17,7 @@
     <div id="mainContainer" style="display: none;"></div>
     <canvas id="visualizationCanvas" style="display: none;"></canvas>
     <div id="imageDisplay" class="image-container"></div>
-
+<div id = "canvasContainer"></div>
     <div id="sidebar">
         <div class="controls">
             <input type="file" id="imageUpload" accept="image/*">
@@ -899,173 +899,222 @@ function combineImagesByIndexes(index1, index2) {
       
         }
 }
-
-// Worker processing
-Promise.allSettled(
-    workersToUse.map(({ worker }, index) =>
-        new Promise((resolve, reject) => {
-            worker.onmessage = (e) => {
-                if (e.data.type === 'processedVariations') {
-                    if (!e.data.variations || e.data.variations.length === 0) {
-                        console.warn(`No variations for ${workersToUse[index].type} worker`);
-                        return;
-                    }
-
-                    workersToUse[index].variations = e.data.variations;
-
-                    e.data.variations.forEach((variation, variationIndex) => {
-                        const img = document.createElement('img');
-                        img.src = variation.imageUrl || createImageFromData(
-                            variation.imageData,
-                            variation.width,
-                            variation.height
-                        );
-
-
-                        
-                        const wrapper = document.createElement('div');
-                        wrapper.className = 'image-wrapper';
-
-                        wrapper.appendChild(img);
-
-                        const container = document.getElementById('imageContainer');
-                        container.appendChild(wrapper);
-                        console.log(workersToUse[index].type);
-                        
-                            generatedImages.push({
-                                index: variationIndex,
-                                type: workersToUse[index].type,
-                                image: img,
-                                imageUrl: variation.imageUrl,
-                                imageData: variation.imageData,
-                                width: variation.width,
-                                height: variation.height
-                            });
-                        
-                        console.log('generatedImages :>> ', generatedImages);
-                    
-                        console.log('Image URL:', variation.imageUrl);
-console.log('Image Data:', variation.imageData);
-console.log('Full generated image object:', generatedImages[generatedImages.length - 1]);
-        //              
-        // 
-        //    function displayGeneratedImages() {
-        //     const imageDisplay = document.getElementById('imageDisplay');
-            
-        //     // Clear previous images
-        //     imageDisplay.innerHTML = '';
-
-        //     // Loop through generated images and create display elements
-        //     generatedImages.forEach((imageData, index) => {
-        //         // Create a container for each image
-        //         const imageContainer = document.createElement('div');
-        //         imageContainer.classList.add('image-item');
-
-        //         // Create image element
-        //         const imgElement = document.createElement('img');
-                
-        //         // Determine how to set the image source
-        //         if (imageData.imageUrl) {
-        //             imgElement.src = imageData.imageUrl;
-        //         } else if (imageData.imageData) {
-        //             // If imageData is a base64 string or Blob
-        //             imgElement.src = imageData.imageData;
-        //         } else if (imageData.image instanceof HTMLImageElement) {
-        //             // If it's an already created image element
-        //             imgElement.src = imageData.image.src;
-        //         }
-
-        //         // Create additional info paragraph
-        //         const infoP = document.createElement('p');
-        //         infoP.textContent = `Image ${index + 1} - Type: ${imageData.type}, Width: ${imageData.width}, Height: ${imageData.height}`;
-
-        //         // Append elements
-        //         imageContainer.appendChild(imgElement);
-        //         imageContainer.appendChild(infoP);
-        //         imageDisplay.appendChild(imageContainer);
-        //     });
-
-        //     // Log for debugging
-        //     console.log('Generated Images:', generatedImages);
-        // }
-
-        // // Call the display function after generating images
-        // displayGeneratedImages();
-           
-    
-        function convertImageDataToUrl(imageData, width, height) {
-    // Create a canvas to draw the image data
+const canvasImages = [];
+function convertImageDataToUrl(imageData, width, height) {
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
     
-    // Get the canvas context
     const ctx = canvas.getContext('2d');
+    const imgDataObj = new ImageData(imageData, width, height);
     
-    // Create an ImageData object from the Uint8ClampedArray
-    const imgData = new ImageData(imageData, width, height);
-    
-    // Draw the image data on the canvas
-    ctx.putImageData(imgData, 0, 0);
-    
-    // Convert the canvas to a data URL
+    ctx.putImageData(imgDataObj, 0, 0);
     return canvas.toDataURL('image/png');
 }
+function displayImagesOnCanvases() {
+    // Clear previous canvas images
+    canvasImages.length = 0;
+
+    // Get the container for canvases
+    const canvasContainer = document.getElementById('canvasContainer');
+    canvasContainer.innerHTML = ''; // Clear previous canvases
+
+    generatedImages.forEach((imageData, index) => {
+        // Create a wrapper div for each canvas
+        const wrapper = document.createElement('div');
+        wrapper.className = 'canvas-wrapper';
+
+        // Create canvas element
+        const canvas = document.createElement('canvas');
+        canvas.width = imageData.width;
+        canvas.height = imageData.height;
+        canvas.id = `canvas-${index}`;
+
+        // Get canvas context
+        const ctx = canvas.getContext('2d');
+
+        // Create an image element to draw on canvas
+        const img = new Image();
+        img.onload = function() {
+            ctx.drawImage(img, 0, 0, imageData.width, imageData.height);
+            
+            // Store canvas reference
+            canvasImages.push({
+                canvas: canvas,
+                imageData: imageData
+            });
+        };
+        img.src = imageData.imageUrl;
+
+        // Create info paragraph
+        const infoP = document.createElement('p');
+        infoP.textContent = `Canvas ${index + 1} - Type: ${imageData.type}, Width: ${imageData.width}, Height: ${imageData.height}`;
+
+        // Append canvas and info to wrapper
+        wrapper.appendChild(canvas);
+        wrapper.appendChild(infoP);
+
+        // Add wrapper to container
+        canvasContainer.appendChild(wrapper);
+    });
+}
+
+    // Worker processing
+    Promise.allSettled(
+        workersToUse.map(({ worker }, index) =>
+            new Promise((resolve, reject) => {
+                worker.onmessage = (e) => {
+                    if (e.data.type === 'processedVariations') {
+                        if (!e.data.variations || e.data.variations.length === 0) {
+                            console.warn(`No variations for ${workersToUse[index].type} worker`);
+                            return;
+                        }
+
+                        workersToUse[index].variations = e.data.variations;
+
+                        e.data.variations.forEach((variation, variationIndex) => {
+                            const img = document.createElement('img');
+                            img.src = variation.imageUrl || createImageFromData(
+                                variation.imageData,
+                                variation.width,
+                                variation.height
+                            );
+
+
+                            
+                            const wrapper = document.createElement('div');
+                            wrapper.className = 'image-wrapper1';
+
+                            wrapper.appendChild(img);
+
+                            const container = document.getElementById('imageContainer');
+                            container.appendChild(wrapper);
+                            console.log(workersToUse[index].type);
+                            
+                                //              
+            // 
+            //    function displayGeneratedImages() {
+            //     const imageDisplay = document.getElementById('imageDisplay');
+                
+            //     // Clear previous images
+            //     imageDisplay.innerHTML = '';
+
+            //     // Loop through generated images and create display elements
+            //     generatedImages.forEach((imageData, index) => {
+            //         // Create a container for each image
+            //         const imageContainer = document.createElement('div');
+            //         imageContainer.classList.add('image-item');
+
+            //         // Create image element
+            //         const imgElement = document.createElement('img');
+                    
+            //         // Determine how to set the image source
+            //         if (imageData.imageUrl) {
+            //             imgElement.src = imageData.imageUrl;
+            //         } else if (imageData.imageData) {
+            //             // If imageData is a base64 string or Blob
+            //             imgElement.src = imageData.imageData;
+            //         } else if (imageData.image instanceof HTMLImageElement) {
+            //             // If it's an already created image element
+            //             imgElement.src = imageData.image.src;
+            //         }
+
+            //         // Create additional info paragraph
+            //         const infoP = document.createElement('p');
+            //         infoP.textContent = `Image ${index + 1} - Type: ${imageData.type}, Width: ${imageData.width}, Height: ${imageData.height}`;
+
+            //         // Append elements
+            //         imageContainer.appendChild(imgElement);
+            //         imageContainer.appendChild(infoP);
+            //         imageDisplay.appendChild(imageContainer);
+            //     });
+
+            //     // Log for debugging
+            //     console.log('Generated Images:', generatedImages);
+            // }
+
+            // // Call the display function after generating images
+            // displayGeneratedImages();
+            
+        
+            function convertImageDataToUrl(imageData, width, height) {
+        // Create a canvas to draw the image data
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        
+        // Get the canvas context
+        const ctx = canvas.getContext('2d');
+        
+        // Create an ImageData object from the Uint8ClampedArray
+        const imgData = new ImageData(imageData, width, height);
+        
+        // Draw the image data on the canvas
+        ctx.putImageData(imgData, 0, 0);
+        
+        // Convert the canvas to a data URL
+        return canvas.toDataURL('image/png');
+    }
+    const imageUrl = convertImageDataToUrl(variation.imageData, variation.width, variation.height);
+
+// Store image data in generatedImages array
 generatedImages.push({ 
     index: variationIndex, 
     type: workersToUse[index].type, 
     image: img, 
-    imageUrl: convertImageDataToUrl(variation.imageData, variation.width, variation.height), 
+    imageUrl: imageUrl, 
     imageData: variation.imageData, 
     width: variation.width, 
     height: variation.height 
 });
+displayImagesOnCanvases();
 
 
-function displayGeneratedImages() {
-    const imageDisplay = document.getElementById('imageDisplay');
-    imageDisplay.innerHTML = ''; // Clear previous images
 
-    generatedImages.forEach((imageData, index) => {
-        const imageContainer = document.createElement('div');
-        imageContainer.classList.add('image-item');
+    function displayGeneratedImages() {
+        const imageDisplay = document.getElementById('imageDisplay');
+        imageDisplay.innerHTML = ''; // Clear previous images
 
-        const imgElement = document.createElement('img');
-        
-        // Use the created imageUrl
-        imgElement.src = imageData.imageUrl;
+        generatedImages.forEach((imageData, index) => {
+            const imageContainer = document.createElement('div');
+            imageContainer.classList.add('image-item');
 
-        const infoP = document.createElement('p');
-        infoP.textContent = `Image ${index + 1} - Type: ${imageData.type}, Width: ${imageData.width}, Height: ${imageData.height}`;
+            const imgElement = document.createElement('img');
+            
+            // Use the created imageUrl
+            imgElement.src = imageData.imageUrl;
 
-        imageContainer.appendChild(imgElement);
-        imageContainer.appendChild(infoP);
-        imageDisplay.appendChild(imageContainer);
+            const infoP = document.createElement('p');
+            infoP.textContent = `Image ${index + 1} - Type: ${imageData.type}, Width: ${imageData.width}, Height: ${imageData.height}`;
+
+            imageContainer.appendChild(imgElement);
+            imageContainer.appendChild(infoP);
+            imageDisplay.appendChild(imageContainer);
+        });
+
+        console.log('Generated Images:', generatedImages);
+    }
+        });
+
+                        resolve({
+                            type: workersToUse[index].type,
+                            variations: e.data.variations
+                        });
+                
+                    }
+                };
+
+                worker.onerror = (error) => {
+                    console.error('Worker error:', error);
+                    reject(error);
+                };
+
+                worker.postMessage(workerMessages[index]);
+            })
+        )
+    ).catch(error => {
+        console.error('Overall worker processing error:', error);
     });
-
-    console.log('Generated Images:', generatedImages);
-}
-    });
-
-                    resolve({
-                        type: workersToUse[index].type,
-                        variations: e.data.variations
-                    });
-              
-                }
-            };
-
-            worker.onerror = (error) => {
-                console.error('Worker error:', error);
-                reject(error);
-            };
-
-            worker.postMessage(workerMessages[index]);
-        })
-    )
-).catch(error => {
-    console.error('Overall worker processing error:', error);
-});
 
 // Helper function to create an image from ImageData
 function createImageFromData(imageData, width, height) {
